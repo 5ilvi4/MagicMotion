@@ -1,0 +1,25 @@
+──────────────────────────────────────────────────────────────────────────────
+INFO.PLIST ENTRIES TO ADD
+──────────────────────────────────────────────────────────────────────────────
+
+In Xcode, open your project's Info.plist and add these two keys.
+The easiest way: click the "+" button next to any existing row.
+
+KEY:   NSCameraUsageDescription
+TYPE:  String
+VALUE: SubwaySurferMotion needs your front camera to track body pose for gesture control.
+
+KEY:   UIRequiresFullScreen
+TYPE:  Boolean
+VALUE: YES
+(This prevents iPadOS Split View, which can interfere with full-screen camera)
+
+──────────────────────────────────────────────────────────────────────────────
+CAPABILITIES TO ENABLE (in Xcode → your Target → Signing & Capabilities)
+──────────────────────────────────────────────────────────────────────────────
+
+No extra capabilities are needed beyond the default.
+Camera access is granted by the NSCameraUsageDescription key above.
+
+If you later want AirPlay / external display, no special entitlement is needed —
+iOS handles it automatically via UIScreen notifications.

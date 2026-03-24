@@ -1,0 +1,24 @@
+# Xcode
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# Build output
+build/
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods (if you ever add it)
+Pods/
