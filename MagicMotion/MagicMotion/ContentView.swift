@@ -132,9 +132,8 @@ struct ContentView: View {
     private func connectPipeline() {
 
         // Step 1: Camera delivers each frame to the pose detector
-        // MediaPipe handles orientation internally — no need to pass it
-        cameraManager.onNewFrame = { [poseDetector] sampleBuffer, _ in
-            poseDetector.processFrame(sampleBuffer)
+        cameraManager.onNewFrame = { [poseDetector] sampleBuffer, orientation in
+            poseDetector.processFrame(sampleBuffer, orientation: orientation)
         }
 
         // Step 2: Pose detector delivers joint data to:

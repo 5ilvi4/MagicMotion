@@ -1,0 +1,7 @@
+platform :ios, '16.0'
+use_frameworks!
+
+target 'MagicMotion' do
+  # MediaPipe Tasks Vision — Google's pose detection (33 landmarks, faster & more accurate than Apple Vision)
+  pod 'MediaPipeTasksVision'
+end

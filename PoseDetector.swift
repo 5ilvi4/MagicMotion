@@ -1,164 +1,191 @@
 // PoseDetector.swift
-// Uses Apple's Vision framework to find a person's body joints in each camera frame.
-// Vision gives us 19 landmark points (joints) with X/Y positions and confidence scores.
+// Uses Google's MediaPipe Tasks Vision to detect 33 body landmarks in each camera frame.
+// MediaPipe is faster and more detailed than Apple Vision — it tracks fingers, feet, and face.
+//
+// COORDINATE SYSTEM (MediaPipe):
+//   (0, 0) = TOP-LEFT of frame      ← same as the screen, no flip needed!
+//   (1, 1) = BOTTOM-RIGHT of frame
+//   x: 0.0 (left edge) → 1.0 (right edge)
+//   y: 0.0 (top edge)  → 1.0 (bottom edge)
 
-import Vision
-import CoreImage
+import MediaPipeTasksVision
+import AVFoundation
+
+// MARK: - MediaPipe Landmark Indices
+// MediaPipe always returns exactly 33 landmarks in a fixed order.
+// This enum gives each index a readable name so we don't have to memorise numbers.
+enum MPLandmark: Int {
+    case nose           = 0
+    case leftEyeInner   = 1,  leftEye       = 2,  leftEyeOuter  = 3
+    case rightEyeInner  = 4,  rightEye      = 5,  rightEyeOuter = 6
+    case leftEar        = 7,  rightEar      = 8
+    case mouthLeft      = 9,  mouthRight    = 10
+    case leftShoulder   = 11, rightShoulder = 12
+    case leftElbow      = 13, rightElbow    = 14
+    case leftWrist      = 15, rightWrist    = 16
+    case leftPinky      = 17, rightPinky    = 18
+    case leftIndex      = 19, rightIndex    = 20
+    case leftThumb      = 21, rightThumb    = 22
+    case leftHip        = 23, rightHip      = 24
+    case leftKnee       = 25, rightKnee     = 26
+    case leftAnkle      = 27, rightAnkle    = 28
+    case leftHeel       = 29, rightHeel     = 30
+    case leftFootIndex  = 31, rightFootIndex = 32
+}
 
 // MARK: - Data Structures
 
-/// The position of one body joint in a single frame.
-struct JointPoint {
-    let name: VNHumanBodyPoseObservation.JointName
-    /// Normalised position: x and y are both 0.0 – 1.0.
-    /// IMPORTANT: Vision uses bottom-left as origin (y=0 = bottom of frame).
-    /// You must flip Y when drawing on screen (screen origin is top-left).
-    let location: CGPoint
-    /// How confident Vision is that this joint is correctly placed (0 = low, 1 = high)
-    let confidence: Float
+/// One landmark point from MediaPipe — position + confidence scores.
+struct LandmarkPoint {
+    let x: Float           // 0..1, left → right
+    let y: Float           // 0..1, top  → bottom
+    let z: Float           // Depth (negative = in front of camera)
+    let visibility: Float  // How likely this point is visible (0..1)
 }
 
-/// All detected joints from one camera frame, plus a timestamp.
+/// All 33 landmarks from one camera frame plus a timestamp.
 struct PoseFrame {
-    let joints:    [VNHumanBodyPoseObservation.JointName: JointPoint]
-    let timestamp: TimeInterval   // Seconds since app launched (from CACurrentMediaTime)
+    /// Always 33 entries (one per MPLandmark). Empty array = no person detected.
+    let landmarks: [LandmarkPoint]
+    let timestamp: TimeInterval
 
-    // Convenience shortcuts for the joints we use in gesture detection
-    var leftHip:    JointPoint? { joints[.leftHip]    }
-    var rightHip:   JointPoint? { joints[.rightHip]   }
-    var leftAnkle:  JointPoint? { joints[.leftAnkle]  }
-    var rightAnkle: JointPoint? { joints[.rightAnkle] }
-    var leftWrist:  JointPoint? { joints[.leftWrist]  }
-    var rightWrist: JointPoint? { joints[.rightWrist] }
+    /// Safe subscript: returns nil if the landmark isn't visible enough.
+    subscript(_ landmark: MPLandmark) -> LandmarkPoint? {
+        guard landmarks.count > landmark.rawValue else { return nil }
+        let lm = landmarks[landmark.rawValue]
+        // Only return the landmark if MediaPipe is reasonably confident it's visible
+        return lm.visibility > 0.5 ? lm : nil
+    }
 
-    /// Midpoint between both hips — used to detect left/right lean.
+    /// Midpoint between left and right hip — used for lean detection.
     var hipMidpoint: CGPoint? {
-        guard let lh = leftHip, let rh = rightHip else { return nil }
-        return CGPoint(
-            x: (lh.location.x + rh.location.x) / 2,
-            y: (lh.location.y + rh.location.y) / 2
-        )
+        guard let lh = self[.leftHip], let rh = self[.rightHip] else { return nil }
+        return CGPoint(x: CGFloat((lh.x + rh.x) / 2),
+                       y: CGFloat((lh.y + rh.y) / 2))
     }
 }
 
+// MARK: - Skeleton Connections
+// Pairs of MPLandmark indices to draw lines between (the "bones").
+let skeletonConnections: [(MPLandmark, MPLandmark)] = [
+    // Face outline
+    (.nose, .leftEyeInner), (.leftEyeInner, .leftEye), (.leftEye, .leftEyeOuter), (.leftEyeOuter, .leftEar),
+    (.nose, .rightEyeInner), (.rightEyeInner, .rightEye), (.rightEye, .rightEyeOuter), (.rightEyeOuter, .rightEar),
+    // Arms
+    (.leftShoulder, .leftElbow),   (.leftElbow, .leftWrist),
+    (.rightShoulder, .rightElbow), (.rightElbow, .rightWrist),
+    // Hands (just index finger tip for now)
+    (.leftWrist, .leftIndex),  (.rightWrist, .rightIndex),
+    // Torso
+    (.leftShoulder, .rightShoulder),
+    (.leftShoulder, .leftHip), (.rightShoulder, .rightHip),
+    (.leftHip, .rightHip),
+    // Legs
+    (.leftHip, .leftKnee),   (.leftKnee, .leftAnkle),   (.leftAnkle, .leftFootIndex),
+    (.rightHip, .rightKnee), (.rightKnee, .rightAnkle), (.rightAnkle, .rightFootIndex)
+]
+
 // MARK: - PoseDetector
 
-/// Runs VNDetectHumanBodyPoseRequest on every camera frame and delivers PoseFrames.
-class PoseDetector {
+/// Wraps MediaPipe PoseLandmarker and delivers PoseFrames on every camera frame.
+class PoseDetector: NSObject {
 
-    // The Vision request object — reused every frame (more efficient than creating new ones)
-    private let bodyPoseRequest = VNDetectHumanBodyPoseRequest()
+    // The MediaPipe pose landmarker — the core detection engine
+    private var poseLandmarker: PoseLandmarker?
 
-    // Called with a fresh PoseFrame after every processed camera frame
+    // Called with a fresh PoseFrame after each processed camera frame
     var onPoseDetected: ((PoseFrame) -> Void)?
 
-    // MARK: All 19 joints Vision can detect (used for skeleton overlay)
-    static let allJoints: [VNHumanBodyPoseObservation.JointName] = [
-        .nose,
-        .leftEye,        .rightEye,
-        .leftEar,        .rightEar,
-        .neck,
-        .leftShoulder,   .rightShoulder,
-        .leftElbow,      .rightElbow,
-        .leftWrist,      .rightWrist,
-        .leftHip,        .rightHip,
-        .leftKnee,       .rightKnee,
-        .leftAnkle,      .rightAnkle,
-        .root                                    // "root" = mid-pelvis point
-    ]
+    override init() {
+        super.init()
+        setupMediaPipe()
+    }
 
-    // MARK: Skeleton connections (pairs of joints to draw lines between)
-    // Each tuple is (jointA, jointB) — draw a line from A to B.
-    static let skeletonConnections: [(VNHumanBodyPoseObservation.JointName,
-                                      VNHumanBodyPoseObservation.JointName)] = [
-        // Face
-        (.nose,          .leftEye),
-        (.nose,          .rightEye),
-        (.leftEye,       .leftEar),
-        (.rightEye,      .rightEar),
-        (.neck,          .nose),
-        // Upper body
-        (.neck,          .leftShoulder),
-        (.neck,          .rightShoulder),
-        (.leftShoulder,  .leftElbow),
-        (.leftElbow,     .leftWrist),
-        (.rightShoulder, .rightElbow),
-        (.rightElbow,    .rightWrist),
-        // Torso
-        (.neck,          .root),
-        (.root,          .leftHip),
-        (.root,          .rightHip),
-        // Legs
-        (.leftHip,       .leftKnee),
-        (.leftKnee,      .leftAnkle),
-        (.rightHip,      .rightKnee),
-        (.rightKnee,     .rightAnkle)
-    ]
+    // MARK: - Setup
 
-    init() {
-        // Limit to 1 person — we only want to track the player, not bystanders
-        bodyPoseRequest.maximumHandCount = 1
+    /// Load the MediaPipe model and configure the landmarker for live camera use.
+    private func setupMediaPipe() {
+        // Look for the model file we added to the Xcode project bundle
+        guard let modelPath = Bundle.main.path(forResource: "pose_landmarker_full",
+                                                ofType: "task") else {
+            print("❌ pose_landmarker_full.task not found in bundle. Did you add it to Xcode?")
+            return
+        }
+
+        let options = PoseLandmarkerOptions()
+        options.baseOptions.modelAssetPath = modelPath
+
+        // liveStream mode: MediaPipe calls our delegate asynchronously — best for camera
+        options.runningMode = .liveStream
+        options.poseLandmarkerLiveStreamDelegate = self
+
+        // Only track one person at a time (the player)
+        options.numPoses = 1
+
+        // Confidence thresholds — lower = more detections but more false positives
+        options.minPoseDetectionConfidence  = 0.5
+        options.minPosePresenceConfidence   = 0.5
+        options.minTrackingConfidence       = 0.5
+
+        do {
+            poseLandmarker = try PoseLandmarker(options: options)
+            print("✅ MediaPipe PoseLandmarker ready")
+        } catch {
+            print("❌ Failed to create PoseLandmarker: \(error)")
+        }
     }
 
     // MARK: - Public API
 
-    /// Process one camera frame.  Runs Vision synchronously on whatever thread calls this.
-    /// - Parameter sampleBuffer: Raw video frame from AVFoundation
-    /// - Parameter orientation:  Tells Vision which way is "up" in the image
-    func processFrame(_ sampleBuffer: CMSampleBuffer,
-                      orientation: CGImagePropertyOrientation) {
-        // Extract the pixel buffer (raw image data) from the camera frame
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+    /// Feed a camera frame into MediaPipe. Results come back via the delegate below.
+    func processFrame(_ sampleBuffer: CMSampleBuffer) {
+        guard let landmarker = poseLandmarker else { return }
 
-        // VNImageRequestHandler wraps the image and runs Vision requests on it
-        let handler = VNImageRequestHandler(
-            cvPixelBuffer: pixelBuffer,
-            orientation:   orientation,
-            options:       [:]
-        )
+        // Wrap the camera frame in MediaPipe's image format
+        guard let mpImage = try? MPImage(sampleBuffer: sampleBuffer) else { return }
+
+        // Timestamp in milliseconds (MediaPipe requires monotonically increasing values)
+        let timestampMs = Int(CACurrentMediaTime() * 1000)
 
         do {
-            // Run body pose detection (~5–15 ms on modern iPad)
-            try handler.perform([bodyPoseRequest])
-
-            // bodyPoseRequest.results is an array of detected people — we want the first one
-            guard let observations = bodyPoseRequest.results,
-                  let bestPose = observations.first else {
-                return   // No person in frame — skip this frame silently
-            }
-
-            let poseFrame = extractJoints(from: bestPose)
-            onPoseDetected?(poseFrame)
-
+            try landmarker.detectAsync(image: mpImage, timestampInMilliseconds: timestampMs)
         } catch {
-            // Vision errors are usually non-fatal (e.g. blurry frame) — just log them
-            print("⚠️ Vision error: \(error.localizedDescription)")
+            print("⚠️ MediaPipe detectAsync error: \(error)")
         }
     }
+}
 
-    // MARK: - Private Helpers
+// MARK: - PoseLandmarkerLiveStreamDelegate
 
-    /// Pull each joint's screen position out of the Vision observation.
-    private func extractJoints(
-        from observation: VNHumanBodyPoseObservation
-    ) -> PoseFrame {
-        var joints: [VNHumanBodyPoseObservation.JointName: JointPoint] = [:]
+/// MediaPipe calls this method on a background thread when it finishes processing a frame.
+extension PoseDetector: PoseLandmarkerLiveStreamDelegate {
 
-        for jointName in Self.allJoints {
-            // recognizedPoint can throw if the joint name is unsupported — guard against that
-            guard let point = try? observation.recognizedPoint(jointName) else { continue }
+    func poseLandmarker(_ poseLandmarker: PoseLandmarker,
+                        didFinishDetection result: PoseLandmarkerResult?,
+                        timestampInMilliseconds: Int,
+                        error: Error?) {
 
-            // Only keep joints Vision is reasonably confident about
-            // 0.3 = 30% confidence threshold — lower this if skeleton is too sparse
-            guard point.confidence > 0.3 else { continue }
+        if let error = error {
+            print("⚠️ MediaPipe detection error: \(error)")
+            return
+        }
 
-            joints[jointName] = JointPoint(
-                name:       jointName,
-                location:   point.location,   // (0,0) = bottom-left in Vision space
-                confidence: point.confidence
+        // result.landmarks is an array of people; we only track the first one
+        guard let result = result,
+              let rawLandmarks = result.landmarks.first else { return }
+
+        // Convert MediaPipe's NormalizedLandmark array into our LandmarkPoint array
+        let landmarks: [LandmarkPoint] = rawLandmarks.map { lm in
+            LandmarkPoint(
+                x:          lm.x,
+                y:          lm.y,
+                z:          lm.z,
+                visibility: lm.visibility ?? 0
             )
         }
 
-        return PoseFrame(joints: joints, timestamp: CACurrentMediaTime())
+        let poseFrame = PoseFrame(landmarks: landmarks,
+                                  timestamp: CACurrentMediaTime())
+        onPoseDetected?(poseFrame)
     }
 }
