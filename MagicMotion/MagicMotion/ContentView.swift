@@ -1,159 +1,277 @@
 // ContentView.swift
-// The main screen of the app.
+// MotionMind
 //
-// Layer stack (bottom to top):
-//   1. Black background
-//   2. Live camera preview (AVCaptureVideoPreviewLayer wrapped in UIViewRepresentable)
-//   3. Skeleton overlay (SwiftUI Canvas drawn on top of camera)
-//   4. Gesture label (large text that pops up when a gesture fires)
-//   5. Status bar (top-left: app name + camera state)
+// Main integrator view. Wires the 6-layer architecture:
+//   1. Capture    (CameraManager / SyntheticFrameSource)
+//   2. Engine     (MotionEngine)
+//   3. Interpreter (MotionInterpreter)
+//   4. Runtime    (GameSession)
+//   5. Presentation (ExternalDisplayManager + GameView on iPad)
+//   6. Diagnostics (DebugOverlayView + FakeMotionSource)
 
 import SwiftUI
 import AVFoundation
 
 struct ContentView: View {
 
-    // ── Dependencies (created once, live for the app's lifetime) ─────────────
-    @StateObject private var cameraManager      = CameraManager()
-    @StateObject private var gestureClassifier  = GestureClassifier()
-    @StateObject private var airPlayManager     = AirPlayManager()
+    // MARK: - Layer 1: Capture
+    @StateObject private var frameSource: CameraManager = CameraManager()
 
-    // PoseDetector and TouchInjector don't need @StateObject because they don't
-    // publish @Published properties we observe directly in this view.
-    private let poseDetector  = PoseDetector()
-    private let touchInjector = TouchInjector()
+    // MARK: - Layer 2: Motion Engine
+    private let motionEngine = MotionEngine()
 
-    // ── View state ────────────────────────────────────────────────────────────
-    /// The most recent skeleton data — updated ~30 fps from the camera thread
-    @State private var currentPose: PoseFrame? = nil
+    // MARK: - Layer 3: Motion Interpreter
+    @StateObject private var interpreter = MotionInterpreter()
+
+    // MARK: - Layer 4: Game Runtime
+    @StateObject private var session = GameSession()
+
+    // MARK: - Layer 5: Presentation
+    @StateObject private var displayManager = ExternalDisplayManager()
+
+    // MARK: - Layer 6: Diagnostics
+    #if DEBUG
+    @State private var useSyntheticInput = false
+    @State private var debugMode = false
+    @State private var currentSnapshot: PoseSnapshot? = nil
+    @State private var fpsCounter: Double = 0.0
+    private let fakeSource = FakeMotionSource()
+    #endif
 
     // MARK: - Body
 
     var body: some View {
         ZStack {
-
-            // ── 1. Black background ──────────────────────────────────────────
             Color.black.ignoresSafeArea()
 
-            // ── 2. Camera preview ────────────────────────────────────────────
-            CameraPreviewRepresentable(cameraManager: cameraManager)
-                .ignoresSafeArea()
-
-            // ── 3. Skeleton overlay ──────────────────────────────────────────
-            // Fills the whole screen and draws joints on top of the camera feed
-            SkeletonOverlayView(poseFrame: currentPose)
-                .ignoresSafeArea()
-
-            // ── 4. Gesture label ─────────────────────────────────────────────
-            gestureLabel
-
-            // ── 5. Status bar ─────────────────────────────────────────────────
-            statusBar
-        }
-        .onAppear {
-            connectPipeline()
-            cameraManager.requestPermissionAndSetup()
-        }
-        .onDisappear {
-            // Stop the camera when the view is removed (saves battery)
-            cameraManager.stopSession()
-        }
-    }
-
-    // MARK: - Sub-views
-
-    /// Big animated label that appears when a gesture fires.
-    private var gestureLabel: some View {
-        VStack {
-            Spacer()
-
-            if gestureClassifier.currentGesture != .none {
-                Text(gestureClassifier.currentGesture.rawValue)
-                    .font(.system(size: 52, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-                    .shadow(color: .black, radius: 4, x: 0, y: 2)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(Color.black.opacity(0.65))
-                    )
-                    .transition(.scale(scale: 0.7).combined(with: .opacity))
+            // --- Layout: iPad or iPad + TV ---
+            if displayManager.isExternalDisplayConnected {
+                operatorSurface  // iPad: camera feed + controls for parent
+            } else {
+                fallbackLayout   // iPad: camera feed + game embedded
             }
-
-            Spacer().frame(height: 48)
         }
-        // SwiftUI animates whenever currentGesture changes
-        .animation(.spring(response: 0.25, dampingFraction: 0.6),
-                   value: gestureClassifier.currentGesture)
+        .onAppear { setupLayers() }
+        .onDisappear { teardownLayers() }
     }
 
-    /// Small info panel in the top-left corner.
-    private var statusBar: some View {
-        VStack {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("SubwaySurferMotion", systemImage: "figure.run")
-                        .font(.caption.bold())
-                        .foregroundColor(.white)
+    // MARK: - Layouts
 
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(cameraManager.isRunning ? Color.green : Color.red)
-                            .frame(width: 8, height: 8)
-                        Text(cameraManager.isRunning ? "Camera running" : "Camera stopped")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.8))
-                    }
+    /// Operator surface on iPad (parent controls). Game is on TV via ExternalDisplayManager.
+    private var operatorSurface: some View {
+        VStack(spacing: 12) {
+            // Top: camera preview + diagnostics
+            VStack {
+                CameraPreviewRepresentable(cameraManager: frameSource)
+                    .frame(height: 300)
+                    .cornerRadius(12)
 
-                    if airPlayManager.isExternalScreenConnected {
-                        Label("TV connected", systemImage: "tv")
-                            .font(.caption2)
-                            .foregroundColor(.cyan)
-                    }
+                #if DEBUG
+                if debugMode {
+                    debugPanel
                 }
-                .padding(10)
-                .background(Color.black.opacity(0.55))
-                .cornerRadius(12)
-
-                Spacer()
+                #endif
             }
+            .padding()
+
             Spacer()
+
+            // Bottom: session controls
+            VStack(spacing: 12) {
+                sessionControlsPanel
+            }
+            .padding()
         }
-        .padding()
     }
 
-    // MARK: - Pipeline
+    /// Fallback: iPad-only, game embedded below camera.
+    private var fallbackLayout: some View {
+        VStack(spacing: 12) {
+            // Top: camera preview
+            CameraPreviewRepresentable(cameraManager: frameSource)
+                .frame(height: 300)
+                .cornerRadius(12)
+                .padding()
 
-    /// Wire together: Camera → PoseDetector → GestureClassifier → TouchInjector
-    ///
-    /// Think of this as connecting LEGO bricks in a chain:
-    ///   frame arrives → joints extracted → gesture classified → swipe fired
-    private func connectPipeline() {
-
-        // Step 1: Camera delivers each frame to the pose detector
-        cameraManager.onNewFrame = { [poseDetector] sampleBuffer, orientation in
-            poseDetector.processFrame(sampleBuffer, orientation: orientation)
-        }
-
-        // Step 2: Pose detector delivers joint data to:
-        //   a) The UI (update the skeleton overlay on the main thread)
-        //   b) The gesture classifier
-        poseDetector.onPoseDetected = { [gestureClassifier] poseFrame in
-            DispatchQueue.main.async {
-                // Update skeleton overlay — must happen on main thread
-                currentPose = poseFrame
+            #if DEBUG
+            if debugMode {
+                debugPanel
+                    .padding()
             }
-            // Classifier runs on whatever thread delivered the frame (background — that's fine)
-            gestureClassifier.addFrame(poseFrame)
+            #endif
+
+            Spacer()
+
+            // Bottom: game (embedded)
+            GameView(session: session)
+                .frame(height: 200)
+                .padding()
+        }
+    }
+
+    // MARK: - Debug panel
+
+    #if DEBUG
+    private var debugPanel: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("DEBUG MODE").font(.caption.bold()).foregroundColor(.yellow)
+                Spacer()
+                Button(action: { useSyntheticInput.toggle() }) {
+                    Label(useSyntheticInput ? "Fake Input ON" : "Fake Input OFF",
+                          systemImage: "waveform.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(useSyntheticInput ? .green : .gray)
+                }
+            }
+
+            if let snap = currentSnapshot {
+                HStack {
+                    Text("Conf: \(Int(snap.trackingConfidence * 100))%")
+                    Text("Event: \(interpreter.currentEvent.displayName)")
+                    Text("FPS: \(String(format: "%.0f", fpsCounter))")
+                }
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(.cyan)
+            }
+        }
+        .padding(10)
+        .background(Color.black.opacity(0.7))
+        .cornerRadius(10)
+    }
+
+    private var sessionControlsPanel: some View {
+        HStack(spacing: 16) {
+            Button(action: { session.beginCalibration() }) {
+                Label("Calibrate", systemImage: "target")
+                    .font(.caption.bold())
+            }
+            .buttonStyle(.bordered)
+
+            Button(action: { session.reset() }) {
+                Label("Reset", systemImage: "arrow.counterclockwise")
+                    .font(.caption.bold())
+            }
+            .buttonStyle(.bordered)
+
+            Spacer()
+
+            Text(sessionStateLabel(session.state))
+                .font(.caption.bold())
+                .foregroundColor(sessionStateColor(session.state))
+        }
+    }
+
+    private func sessionStateLabel(_ state: GameSessionState) -> String {
+        switch state {
+        case .idle:                return "Idle"
+        case .calibrating:         return "Calibrating"
+        case .countdown(let n):    return "Countdown: \(n)"
+        case .active:              return "▶️ Playing"
+        case .paused(let reason):  return "⏸️ Paused (\(reason))"
+        case .roundOver:           return "Game Over"
+        case .completed(let score):return "✅ Done (\(score))"
+        }
+    }
+
+    private func sessionStateColor(_ state: GameSessionState) -> Color {
+        switch state {
+        case .active:   return .green
+        case .paused:   return .orange
+        case .idle:     return .gray
+        default:        return .white
+        }
+    }
+    #endif
+
+    // MARK: - Setup
+
+    private func setupLayers() {
+        // Layer 2 → 3: Wire MotionEngine to MotionInterpreter
+        motionEngine.delegate = interpreter
+
+        // Layer 3 → 4: Wire MotionInterpreter to GameSession
+        interpreter.onMotionEvent = { [weak session] event in
+            session?.handle(event: event)
         }
 
-        // Step 3: Gesture classifier fires confirmed gestures to the touch injector
-        gestureClassifier.onGestureDetected = { [touchInjector] gesture in
-            touchInjector.inject(gesture: gesture)
+        // Layer 1: Start frame source
+        #if DEBUG
+        if useSyntheticInput {
+            // Use fake frames + fake poses (bypass MotionEngine entirely)
+            fakeSource.delegate = interpreter
+            fakeSource.start()
+            print("🔧 DEBUG: Using SyntheticFrameSource + FakeMotionSource")
+        } else {
+            frameSource.onNewFrame = { [motionEngine] buffer, orientation in
+                motionEngine.processFrame(buffer, orientation: orientation)
+            }
+            frameSource.start()
+            print("📷 Using real camera")
         }
+        #else
+        frameSource.onNewFrame = { [motionEngine] buffer, orientation in
+            motionEngine.processFrame(buffer, orientation: orientation)
+        }
+        frameSource.start()
+        #endif
+
+        // Layer 5: Wire external display
+        if displayManager.isExternalDisplayConnected, let externalScreen = UIScreen.screens.first(where: { $0 != UIScreen.main }) {
+            displayManager.connect(to: externalScreen, session: session)
+        }
+
+        // Layer 4: Start game
+        session.beginCalibration()
+
+        print("✅ All 6 layers initialized and wired")
+    }
+
+    private func teardownLayers() {
+        #if DEBUG
+        if useSyntheticInput {
+            fakeSource.stop()
+        } else {
+            frameSource.stop()
+        }
+        #else
+        frameSource.stop()
+        #endif
+
+        session.reset()
+        displayManager.disconnect()
     }
 }
+
+// MARK: - CameraPreviewRepresentable
+
+struct CameraPreviewRepresentable: UIViewRepresentable {
+    let cameraManager: CameraManager
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .black
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        guard let previewLayer = cameraManager.previewLayer else { return }
+        if previewLayer.superlayer == nil { uiView.layer.addSublayer(previewLayer) }
+        DispatchQueue.main.async { previewLayer.frame = uiView.bounds }
+    }
+}
+
+// MARK: - Preview
+
+#if DEBUG
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .previewDevice("iPad Air (5th generation)")
+            .previewInterfaceOrientation(.portrait)
+    }
+}
+#endif
 
 // MARK: - CameraPreviewRepresentable
 
