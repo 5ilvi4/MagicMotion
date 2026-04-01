@@ -1,0 +1,19 @@
+# Arduino IDE Library Requirements
+# Install via: Sketch → Include Library → Manage Libraries
+# ---------------------------------------------------------
+
+# M5StickC PLUS2 board support (display, IMU, AXP2101 PMIC)
+# Library Manager search: "M5StickCPlus2"
+M5StickCPlus2 >= 1.0.0
+
+# BLE HID Keyboard — ESP32 acts as wireless keyboard
+# Library Manager search: "ESP32 BLE Keyboard"
+# Author: T-vK (chegewara)
+# GitHub: https://github.com/T-vK/ESP32-BLE-Keyboard
+ESP32-BLE-Keyboard >= 0.3.2
+
+# Note: Arduino-ESP32 BLE stack (BLEDevice, BLEServer, etc.)
+# is bundled with the ESP32 board package — no separate install.
+#
+# Board package (Tools → Board Manager):
+#   "ESP32 by Espressif Systems" >= 2.0.14
