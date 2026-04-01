@@ -55,18 +55,35 @@ class ExternalDisplayManager: ObservableObject {
 
     // MARK: - Connect / disconnect
 
-    /// Create a UIWindow on the external screen and display GameView on it.
+    /// Create a UIWindow on the external screen and display ParentMonitorView on it.
+    func connect(to screen: UIScreen, session: GameSession, interpreter: MotionInterpreter, cameraManager: CameraManager) {
+        guard externalWindow == nil else { return }
+
+        let window = UIWindow(frame: screen.bounds)
+        window.screen = screen
+        let monitorView = ParentMonitorView(
+            interpreter: interpreter,
+            session: session,
+            cameraManager: cameraManager
+        )
+        window.rootViewController = UIHostingController(rootView: monitorView)
+        window.makeKeyAndVisible()
+        externalWindow = window
+        isExternalDisplayConnected = true
+        print("📺 ExternalDisplayManager: ParentMonitorView created on external screen \(screen.bounds.size)")
+    }
+
+    /// Legacy overload — shows GameView (fallback for older callers).
     func connect(to screen: UIScreen, session: GameSession) {
         guard externalWindow == nil else { return }
 
         let window = UIWindow(frame: screen.bounds)
         window.screen = screen
-        let gameView = GameView(session: session)
-        window.rootViewController = UIHostingController(rootView: gameView)
+        window.rootViewController = UIHostingController(rootView: GameView(session: session))
         window.makeKeyAndVisible()
         externalWindow = window
         isExternalDisplayConnected = true
-        print("📺 ExternalDisplayManager: window created on external screen")
+        print("📺 ExternalDisplayManager: GameView (fallback) created on external screen")
     }
 
     func disconnect() {

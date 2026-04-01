@@ -26,6 +26,9 @@ class MotionEngine: NSObject {
 
     weak var delegate: MotionEngineDelegate?
 
+    /// Optional secondary callback for every emitted PoseSnapshot (e.g. session logger).
+    var onPoseSnapshot: ((PoseSnapshot) -> Void)?
+
     // MARK: - Private
 
     #if canImport(MediaPipeTasksVision)
@@ -159,6 +162,7 @@ extension MotionEngine: PoseLandmarkerLiveStreamDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.delegate?.motionEngine(self, didOutput: snapshot)
+            self.onPoseSnapshot?(snapshot)
         }
     }
 

@@ -4,6 +4,28 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>We need camera access to detect your body movements for gesture control</string>
+	<key>NSBluetoothCentralUsageDescription</key>
+	<string>MotionMind uses Bluetooth to communicate with your motion band for gesture control during gameplay.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>MotionMind broadcasts motion data via Bluetooth for research and clinical assessment.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>MotionMind</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>motionmind</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

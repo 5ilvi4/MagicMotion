@@ -20,6 +20,12 @@ class CameraManager: NSObject, ObservableObject, FrameSource {
     /// Whether the camera session is currently running.
     @Published var isRunning = false
 
+    /// Explicit active flag — survives background transitions.
+    @Published var isCameraActive = false
+
+    /// Total frames delivered since last start (diagnostics).
+    @Published var frameCount: Int = 0
+
     /// Begin requesting permission and running the capture session.
     func start() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -35,10 +41,20 @@ class CameraManager: NSObject, ObservableObject, FrameSource {
     }
 
     /// Stop the capture session.
+    /// NOTE: Do NOT call this when the app backgrounds — the camera must
+    /// keep running so MediaPipe can continue gesture detection.
     func stop() {
+        // Guard: never stop while a background task is active
+        if BackgroundTaskManager.shared.isInBackground {
+            print("📷 CameraManager: stop() ignored — background task is active")
+            return
+        }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.captureSession.stopRunning()
-            DispatchQueue.main.async { self?.isRunning = false }
+            DispatchQueue.main.async {
+                self?.isRunning = false
+                self?.isCameraActive = false
+            }
         }
     }
 
@@ -78,7 +94,11 @@ class CameraManager: NSObject, ObservableObject, FrameSource {
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.captureSession.startRunning()
-            DispatchQueue.main.async { self?.isRunning = true }
+            DispatchQueue.main.async {
+                self?.isRunning = true
+                self?.isCameraActive = true
+                self?.frameCount = 0
+            }
         }
     }
 }
@@ -97,6 +117,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         case .landscapeRight:      orientation = .left
         default:                   orientation = .up
         }
+        DispatchQueue.main.async { self.frameCount += 1 }
         onNewFrame?(sampleBuffer, orientation)
     }
 }

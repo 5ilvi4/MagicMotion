@@ -28,11 +28,12 @@ struct ContentView: View {
 
     // MARK: - Layer 5: Presentation
     @StateObject private var displayManager = ExternalDisplayManager()
+    @StateObject private var gameLauncher = GameLauncher.shared
 
     // MARK: - Layer 6: Diagnostics
     #if DEBUG
-    @State private var useSyntheticInput = false
-    @State private var debugMode = false
+    @State private var useSyntheticInput = true  // ← DEBUG MODE: Using FakeMotionSource (no camera needed)
+    @State private var debugMode = true  // ← Auto-enable debug panel
     @State private var currentSnapshot: PoseSnapshot? = nil
     @State private var fpsCounter: Double = 0.0
     private let fakeSource = FakeMotionSource()
@@ -87,25 +88,42 @@ struct ContentView: View {
     /// Fallback: iPad-only, game embedded below camera.
     private var fallbackLayout: some View {
         VStack(spacing: 12) {
-            // Top: camera preview
+            #if DEBUG
+            // In DEBUG mode with synthetic input, show full game
+            if useSyntheticInput {
+                GameView(session: session)
+                    .ignoresSafeArea()
+            } else {
+                // With real camera, show camera preview + game
+                CameraPreviewRepresentable(cameraManager: frameSource)
+                    .frame(height: 300)
+                    .cornerRadius(12)
+                    .padding()
+
+                if debugMode {
+                    debugPanel
+                        .padding()
+                }
+
+                Spacer()
+
+                GameView(session: session)
+                    .frame(height: 200)
+                    .padding()
+            }
+            #else
+            // RELEASE: Always show camera + game
             CameraPreviewRepresentable(cameraManager: frameSource)
                 .frame(height: 300)
                 .cornerRadius(12)
                 .padding()
 
-            #if DEBUG
-            if debugMode {
-                debugPanel
-                    .padding()
-            }
-            #endif
-
             Spacer()
 
-            // Bottom: game (embedded)
             GameView(session: session)
                 .frame(height: 200)
                 .padding()
+            #endif
         }
     }
 
@@ -141,24 +159,85 @@ struct ContentView: View {
     }
 
     private var sessionControlsPanel: some View {
-        HStack(spacing: 16) {
-            Button(action: { session.beginCalibration() }) {
-                Label("Calibrate", systemImage: "target")
+        VStack(spacing: 12) {
+            // Status indicators
+            HStack(spacing: 16) {
+                statusIndicator(
+                    icon: "camera.fill",
+                    label: "Camera",
+                    active: frameSource.isCameraActive
+                )
+                statusIndicator(
+                    icon: "waveform",
+                    label: "MediaPipe",
+                    active: frameSource.isRunning
+                )
+                statusIndicator(
+                    icon: "tv",
+                    label: "Monitor",
+                    active: displayManager.isExternalDisplayConnected
+                )
+                Spacer()
+                Text(sessionStateLabel(session.state))
                     .font(.caption.bold())
+                    .foregroundColor(sessionStateColor(session.state))
             }
-            .buttonStyle(.bordered)
 
-            Button(action: { session.reset() }) {
-                Label("Reset", systemImage: "arrow.counterclockwise")
-                    .font(.caption.bold())
+            Divider().background(Color.white.opacity(0.3))
+
+            // Game launch / return button
+            if gameLauncher.gameRunning {
+                Button(action: { gameLauncher.returnFromGame() }) {
+                    Label("BACK TO MOTIONMIND", systemImage: "arrow.uturn.left")
+                        .frame(maxWidth: .infinity)
+                        .padding(12)
+                        .background(Color.orange)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                        .font(.headline)
+                }
+            } else {
+                Button(action: {
+                    gameLauncher.launchSubwaySurfers()
+                    BackgroundTaskManager.shared.beginBackgroundProcessing()
+                }) {
+                    Label("🎮  PLAY GAME", systemImage: "gamecontroller.fill")
+                        .frame(maxWidth: .infinity)
+                        .padding(12)
+                        .background(Color.green)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                        .font(.headline)
+                }
             }
-            .buttonStyle(.bordered)
 
-            Spacer()
+            // Calibrate + Reset
+            HStack(spacing: 12) {
+                Button(action: { session.beginCalibration() }) {
+                    Label("Calibrate", systemImage: "target")
+                        .font(.caption.bold())
+                }
+                .buttonStyle(.bordered)
 
-            Text(sessionStateLabel(session.state))
-                .font(.caption.bold())
-                .foregroundColor(sessionStateColor(session.state))
+                Button(action: {
+                    session.reset()
+                    MotionSessionLogger.shared.reset()
+                }) {
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                        .font(.caption.bold())
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    private func statusIndicator(icon: String, label: String, active: Bool) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: icon)
+                .foregroundColor(active ? .green : .red)
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundColor(.white.opacity(0.7))
         }
     }
 
@@ -190,9 +269,15 @@ struct ContentView: View {
         // Layer 2 → 3: Wire MotionEngine to MotionInterpreter
         motionEngine.delegate = interpreter
 
-        // Layer 3 → 4: Wire MotionInterpreter to GameSession
+        // Layer 3 → 4: Wire MotionInterpreter to GameSession + Logger
         interpreter.onMotionEvent = { [weak session] event in
             session?.handle(event: event)
+        }
+
+        // Wire logger: every snapshot goes to MotionSessionLogger
+        motionEngine.onPoseSnapshot = { [weak interpreter] snapshot in
+            guard let event = interpreter?.currentEvent, event != .none else { return }
+            MotionSessionLogger.shared.log(event: event, snapshot: snapshot)
         }
 
         // Layer 1: Start frame source
@@ -216,9 +301,15 @@ struct ContentView: View {
         frameSource.start()
         #endif
 
-        // Layer 5: Wire external display
-        if displayManager.isExternalDisplayConnected, let externalScreen = UIScreen.screens.first(where: { $0 != UIScreen.main }) {
-            displayManager.connect(to: externalScreen, session: session)
+        // Layer 5: Wire external display with ParentMonitorView
+        if displayManager.isExternalDisplayConnected,
+           let externalScreen = UIScreen.screens.first(where: { $0 != UIScreen.main }) {
+            displayManager.connect(
+                to: externalScreen,
+                session: session,
+                interpreter: interpreter,
+                cameraManager: frameSource
+            )
         }
 
         // Layer 4: Start game
