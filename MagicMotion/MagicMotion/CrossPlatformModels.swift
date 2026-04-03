@@ -153,7 +153,8 @@ public struct CPPoseFrame: Codable {
     
     /// Check if a landmark is above/below a threshold
     public func isAbove(_ part: BodyPart, yThreshold: Float) -> Bool? {
-        landmark(for: part)?.y.map { $0 < yThreshold }
+        guard let lm = landmark(for: part) else { return nil }
+        return lm.y < yThreshold
     }
     
     /// Check if landmarks are aligned horizontally (within tolerance)

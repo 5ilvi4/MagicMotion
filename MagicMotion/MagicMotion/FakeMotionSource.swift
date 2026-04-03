@@ -57,6 +57,11 @@ class FakeMotionSource {
 
     // MARK: - Static fixture scripts
 
+    /// Demo script cycling through all gestures — used as default for DEBUG mode.
+    static let demoScript: Script = {
+        handsUpScript + jumpScript + leanLeftScript + leanRightScript + squatScript + freezeScript
+    }()
+
     /// 10 frames: both wrists raised above shoulders
     static let handsUpScript: Script = {
         let snap = standingPose(leftWristY: 0.10, rightWristY: 0.10)

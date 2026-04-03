@@ -303,7 +303,8 @@ struct ContentView: View {
         if useSyntheticInput {
             // Use fake frames + fake poses (bypass MotionEngine entirely)
             fakeSource.delegate = interpreter
-            fakeSource.start()
+            // FakeMotionSource uses replay(script:) — start a demo script
+            fakeSource.replay(script: FakeMotionSource.demoScript)
             print("🔧 DEBUG: Using SyntheticFrameSource + FakeMotionSource")
         } else {
             frameSource.onNewFrame = { [motionEngine] buffer, orientation in
