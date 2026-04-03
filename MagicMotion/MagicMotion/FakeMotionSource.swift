@@ -5,6 +5,7 @@
 // Drives MotionInterpreter with scripted PoseSnapshots — no camera, no MediaPipe.
 
 import Foundation
+import Combine
 
 /// A scripted pose replayer. Zero camera / MediaPipe dependencies.
 class FakeMotionSource {

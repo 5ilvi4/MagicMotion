@@ -188,7 +188,7 @@ public protocol PoseDetectorProtocol {
 }
 
 /// Base class for gesture classification - designed for cross-platform porting
-open class GestureClassifier {
+open class CPGestureClassifier {
     /// Minimum confidence for gesture detection
     open var confidenceThreshold: Float = 0.7
     

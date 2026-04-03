@@ -19,7 +19,7 @@ protocol PoseDetectorDelegate: AnyObject {
 }
 
 /// Detects human body pose and converts to cross-platform PoseFrame format
-class PoseDetector: PoseDetectorProtocol {
+final class PoseDetector: PoseDetectorProtocol {
     typealias ImageType = CMSampleBuffer
     
     // MARK: - Properties

@@ -52,8 +52,8 @@ class GameSession: ObservableObject {
     /// Frame counter for SwiftUI debatch: only publish obstacles/coins every 3rd frame.
     private var frameCount: Int = 0
     /// Shadow copies mutated every frame; pushed to @Published only on publish frames.
-    private var _obstacles: [Obstacle] = []
-    private var _coins: [Coin] = []
+    private var shadowObstacles: [Obstacle] = []
+    private var shadowCoins: [Coin] = []
 
     // MARK: - State transitions (the ONLY way to mutate `state`)
 
@@ -174,8 +174,8 @@ class GameSession: ObservableObject {
         score = 0
         distance = 0
         speed = 5.0
-        _obstacles = []
-        _coins = []
+        shadowObstacles = []
+        shadowCoins = []
         obstacles = []
         coins = []
         frameCount = 0
@@ -195,17 +195,17 @@ class GameSession: ObservableObject {
     private func updateGame() {
         frameCount += 1
 
-        for i in 0..<_obstacles.count { _obstacles[i].yPosition += speed }
-        for i in 0..<_coins.count     { _coins[i].yPosition     += speed }
+        for i in 0..<shadowObstacles.count { shadowObstacles[i].yPosition += speed }
+        for i in 0..<shadowCoins.count     { shadowCoins[i].yPosition     += speed }
 
-        _obstacles.removeAll { $0.yPosition > 1000 }
-        _coins.removeAll     { $0.yPosition > 1000 }
+        shadowObstacles.removeAll { $0.yPosition > 1000 }
+        shadowCoins.removeAll     { $0.yPosition > 1000 }
 
         distance += 1
         if distance % 500 == 0 { speed += 0.5 }
 
         // Collision check (every frame — needed for accuracy)
-        for obstacle in _obstacles {
+        for obstacle in shadowObstacles {
             guard obstacle.yPosition > 600 && obstacle.yPosition < 750 else { continue }
             guard obstacle.lane == player.lane else { continue }
             var hit = false
@@ -218,22 +218,22 @@ class GameSession: ObservableObject {
         }
 
         // Coin collection (every frame)
-        for (idx, coin) in _coins.enumerated().reversed() {
+        for (idx, coin) in shadowCoins.enumerated().reversed() {
             if coin.yPosition > 650 && coin.yPosition < 750 && coin.lane == player.lane {
                 score += 10
-                _coins.remove(at: idx)
+                shadowCoins.remove(at: idx)
             }
         }
 
         // Publish to SwiftUI only every 3rd frame to reduce diffing overhead
         if frameCount % 3 == 0 {
-            obstacles = _obstacles
-            coins     = _coins
+            obstacles = shadowObstacles
+            coins     = shadowCoins
         }
     }
 
     private func spawnObstacle() {
-        _obstacles.append(Obstacle(
+        shadowObstacles.append(Obstacle(
             lane: Int.random(in: 0...2),
             yPosition: -200,
             type: [.barrier, .ceiling, .train].randomElement()!
@@ -243,7 +243,7 @@ class GameSession: ObservableObject {
     private func spawnCoins() {
         let n = Int.random(in: 1...3)
         for _ in 0..<n {
-            _coins.append(Coin(lane: Int.random(in: 0...2), yPosition: -150))
+            shadowCoins.append(Coin(lane: Int.random(in: 0...2), yPosition: -150))
         }
     }
 }

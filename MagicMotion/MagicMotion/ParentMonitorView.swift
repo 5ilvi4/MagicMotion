@@ -25,8 +25,12 @@ struct ParentMonitorView: View {
 
             // 3. Debug skeleton overlay (visible on monitor only)
             #if DEBUG
-            DebugOverlayView(interpreter: interpreter)
-                .ignoresSafeArea()
+            DebugOverlayView(
+                snapshot: nil,
+                currentEvent: interpreter.currentEvent,
+                fps: 0
+            )
+            .ignoresSafeArea()
             #endif
 
             // 4. HUD panels
@@ -81,9 +85,9 @@ struct ParentMonitorView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 16) {
-            metricTile(label: "Gestures", value: "\(session.player.score / 10)")
-            metricTile(label: "Score", value: "\(session.player.score)")
-            metricTile(label: "Distance", value: "\(session.player.distance)m")
+            metricTile(label: "Gestures", value: "\(session.score / 10)")
+            metricTile(label: "Score", value: "\(session.score)")
+            metricTile(label: "Distance", value: "\(session.distance)m")
             metricTile(label: "Symmetry", value: symmetryLabel)
             metricTile(label: "Avg Conf", value: String(format: "%.0f%%", avgConfidence * 100))
         }
@@ -140,8 +144,7 @@ struct ParentMonitorView: View {
     }
 
     private var symmetryLabel: String {
-        let left = MotionSessionLogger.shared.exportJSON()
-        // Simple display — real symmetry comes from MotionSessionLogger
+        // Real symmetry comes from MotionSessionLogger
         return "—"
     }
 

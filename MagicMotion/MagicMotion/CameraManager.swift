@@ -7,6 +7,7 @@
 //
 
 import AVFoundation
+import Combine
 import UIKit
 
 /// Manages camera capture session and delivers video frames for processing.

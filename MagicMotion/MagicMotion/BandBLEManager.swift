@@ -61,7 +61,7 @@ final class BandBLEManager: NSObject, ObservableObject {
     nonisolated(unsafe) private var centralManager: CBCentralManager!
     nonisolated(unsafe) private var peripheral: CBPeripheral?
     nonisolated(unsafe) private var gestureCharacteristic: CBCharacteristic?
-    nonisolated(unsafe) private let bleQueue = DispatchQueue(label: "com.magicmotion.ble", qos: .userInitiated)
+    private let bleQueue = DispatchQueue(label: "com.magicmotion.ble", qos: .userInitiated)
 
     // MARK: - Init
 

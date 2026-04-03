@@ -5,6 +5,7 @@
 // Survives app crashes and game switches. Exports JSON for backend upload.
 
 import Foundation
+import UIKit
 
 // MARK: - Data Models
 
