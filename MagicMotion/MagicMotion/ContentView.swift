@@ -180,11 +180,7 @@ struct ContentView: View {
                     label: "Monitor",
                     active: displayManager.isExternalDisplayConnected
                 )
-                statusIndicator(
-                    icon: "antenna.radiowaves.left.and.right",
-                    label: "Band",
-                    active: band.isConnected
-                )
+                bandStatusIndicator
                 Spacer()
                 Text(sessionStateLabel(session.state))
                     .font(.caption.bold())
@@ -246,6 +242,19 @@ struct ContentView: View {
             Text(label)
                 .font(.system(size: 9))
                 .foregroundColor(.white.opacity(0.7))
+        }
+    }
+
+    /// Band status uses green when connected, yellow (not red) when scanning/disconnected.
+    private var bandStatusIndicator: some View {
+        VStack(spacing: 3) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .foregroundColor(band.isConnected ? .green : .yellow)
+            Text(band.isConnected ? "Band ✓" : band.statusText)
+                .font(.system(size: 9))
+                .foregroundColor(.white.opacity(0.7))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
     }
 

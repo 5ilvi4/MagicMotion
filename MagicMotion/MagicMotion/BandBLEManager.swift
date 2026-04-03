@@ -1,23 +1,20 @@
 // BandBLEManager.swift
 // MagicMotion
 //
-// Manages CoreBluetooth Central connection to the MotionMind wrist band.
-// Scans for a peripheral whose name contains "MotionMind", connects, discovers
-// the FFF0 service and FFF1 gesture characteristic, then exposes `send(event:)`
-// so the rest of the app can fire HID-keyed gestures to the band.
+// CoreBluetooth Central manager for the MotionMind wrist band.
 //
 // GATT layout (mirrors band-firmware/BLEGATTServer.h):
 //   Service  0000fff0-0000-1000-8000-00805f9b34fb
 //   Char     0000fff1-0000-1000-8000-00805f9b34fb  (write-without-response)
 //
-// MotionEvent → HID byte map (mirrors band-firmware/GestureMapping.h):
-//   0x01 → leanLeft   → LEFT_ARROW
-//   0x02 → leanRight  → RIGHT_ARROW
-//   0x03 → jump       → SPACEBAR
-//   0x04 → squat      → DOWN_ARROW
+// MotionEvent → HID byte map (mirrors band-firmware/Config.h):
+//   0x01 leanLeft   → LEFT_ARROW
+//   0x02 leanRight  → RIGHT_ARROW
+//   0x03 jump       → SPACEBAR
+//   0x04 squat      → DOWN_ARROW
+//   0xFF endSession → band resets
 
 import CoreBluetooth
-import Combine
 import Foundation
 
 // MARK: - Constants
@@ -31,79 +28,80 @@ private enum BandBLE {
 
 // MARK: - BandBLEManager
 
-/// Singleton-style `ObservableObject` that manages the CoreBluetooth Central
-/// session with the MotionMind wrist band.  Drop it into the SwiftUI environment
-/// as an `@StateObject` and call `send(gesture:)` whenever a gesture fires.
+/// Manages the CoreBluetooth Central role for the MotionMind wrist band.
+/// All @Published mutations are dispatched to the main thread.
+/// The app degrades gracefully when the band is off — sends are no-ops.
 final class BandBLEManager: NSObject, ObservableObject {
 
-    // MARK: Published state (drives UI indicators)
+    // MARK: - Published state
 
-    /// Whether the band is currently connected and the gesture characteristic
-    /// is ready to accept writes.
+    /// true once the gesture characteristic is ready to accept writes.
     @Published private(set) var isConnected: Bool = false
 
-    /// Human-readable status string for the debug/status panel.
-    @Published private(set) var statusText: String = "BLE: Off"
+    /// Human-readable status for the status bar / debug panel.
+    @Published private(set) var statusText: String = "Band: Off"
 
-    // MARK: Private CoreBluetooth objects
+    // MARK: - Private CoreBluetooth
 
     private var centralManager: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var gestureCharacteristic: CBCharacteristic?
 
-    // MARK: Init
+    // MARK: - Init
 
     override init() {
         super.init()
-        // Restore-identifier lets iOS re-instantiate us after background relaunch.
         centralManager = CBCentralManager(
             delegate: self,
             queue: DispatchQueue(label: "com.magicmotion.ble", qos: .userInitiated),
-            options: [CBCentralManagerOptionRestoreIdentifierKey: "MagicMotionBandCentral"]
+            options: [CBCentralManagerOptionRestoreIdentifierKey: "MagicMotionBand"]
         )
     }
 
-    // MARK: Public API
+    // MARK: - Public API
 
-    /// Forward a detected `MotionEvent` to the band as a single-byte GATT write.
-    /// No-op if the characteristic is not yet ready or the event has no mapping.
+    /// Send a MotionEvent to the band. No-op when not connected or unmapped.
     func send(event: MotionEvent) {
         guard isConnected,
               let peripheral = peripheral,
               let characteristic = gestureCharacteristic else { return }
-
         let byte: UInt8
         switch event {
         case .leanLeft:  byte = 0x01
         case .leanRight: byte = 0x02
         case .jump:      byte = 0x03
         case .squat:     byte = 0x04
-        default:         return   // handsUp / handsDown / freeze / none — no HID mapping
+        default:         return
         }
-
-        let data = Data([byte])
-        peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
-        log("📡 Sent event \(event.displayName) → 0x\(String(format: "%02X", byte))")
+        peripheral.writeValue(Data([byte]), for: characteristic, type: .withoutResponse)
+        log("📡 \(event.displayName) → 0x\(String(format: "%02X", byte))")
     }
 
-    // For convenience when callers hold a `Gesture` value.
-    // Maps the Gesture enum (pose-classifier output) onto MotionEvent space.
+    /// Convenience bridge from the app's Gesture enum.
     func send(gesture: Gesture) {
         switch gesture {
-        case .swipeLeft:  send(event: .leanLeft)
-        case .swipeRight: send(event: .leanRight)
-        case .jump, .swipeUp: send(event: .jump)
-        case .swipeDown:  send(event: .squat)
-        case .none:       break
+        case .swipeLeft:        send(event: .leanLeft)
+        case .swipeRight:       send(event: .leanRight)
+        case .jump, .swipeUp:  send(event: .jump)
+        case .swipeDown:        send(event: .squat)
+        case .none:             break
         }
     }
 
-    // MARK: Scanning helpers
+    /// Signal the band to reset (call on app background / session end).
+    func sendEndSession() {
+        guard isConnected,
+              let peripheral = peripheral,
+              let characteristic = gestureCharacteristic else { return }
+        peripheral.writeValue(Data([0xFF]), for: characteristic, type: .withoutResponse)
+        log("📡 END_SESSION → 0xFF")
+    }
+
+    // MARK: - Private helpers
 
     private func startScan() {
-        guard centralManager.state == .poweredOn else { return }
-        guard !centralManager.isScanning else { return }
-        statusText = "BLE: Scanning…"
+        guard centralManager.state == .poweredOn, !centralManager.isScanning else { return }
+        setStatus("Band: Scanning…")
         centralManager.scanForPeripherals(
             withServices: [BandBLE.serviceUUID],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
@@ -121,17 +119,21 @@ final class BandBLEManager: NSObject, ObservableObject {
         }
     }
 
-    private func updateConnectedState(_ connected: Bool) {
+    private func setConnected(_ connected: Bool) {
         DispatchQueue.main.async { [weak self] in
             self?.isConnected = connected
-            self?.statusText = connected ? "BLE: ✓ Band" : "BLE: Disconnected"
+            self?.statusText  = connected ? "Band ✓" : "Band: Disconnected"
         }
     }
 
-    private func log(_ message: String) {
-        #if DEBUG
-        print("[BandBLEManager] \(message)")
-        #endif
+    private func setStatus(_ text: String) {
+        DispatchQueue.main.async { [weak self] in self?.statusText = text }
+    }
+
+    private func log(_ msg: String) {
+#if DEBUG
+        print("[BandBLEManager] \(msg)")
+#endif
     }
 }
 
@@ -142,21 +144,18 @@ extension BandBLEManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
-            log("✅ Bluetooth powered on")
-            DispatchQueue.main.async { self.statusText = "BLE: Ready" }
+            log("✅ Bluetooth on — scanning")
+            setStatus("Band: Ready")
             startScan()
         case .poweredOff:
-            log("⚠️ Bluetooth powered off")
-            updateConnectedState(false)
-            DispatchQueue.main.async { self.statusText = "BLE: Off" }
+            setConnected(false)
+            setStatus("Band: BT Off")
         case .unauthorized:
-            log("🚫 Bluetooth unauthorized")
-            DispatchQueue.main.async { self.statusText = "BLE: No Permission" }
+            setStatus("Band: No Permission")
         case .unsupported:
-            log("🚫 Bluetooth unsupported on this device")
-            DispatchQueue.main.async { self.statusText = "BLE: Unsupported" }
+            setStatus("Band: Unsupported")
         default:
-            log("ℹ️ Bluetooth state: \(central.state.rawValue)")
+            break
         }
     }
 
@@ -164,54 +163,54 @@ extension BandBLEManager: CBCentralManagerDelegate {
                         didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any],
                         rssi RSSI: NSNumber) {
-        let name = peripheral.name ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "")
+        let name = peripheral.name
+            ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
+            ?? ""
         guard name.contains(BandBLE.deviceNameMatch) else { return }
-
-        log("📡 Found peripheral: \(name) — connecting…")
+        log("📡 Found: \(name) — connecting…")
         stopScan()
         self.peripheral = peripheral
-        self.peripheral!.delegate = self
+        peripheral.delegate = self
         central.connect(peripheral, options: nil)
-        DispatchQueue.main.async { self.statusText = "BLE: Connecting…" }
+        setStatus("Band: Connecting…")
     }
 
-    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+    func centralManager(_ central: CBCentralManager,
+                        didConnect peripheral: CBPeripheral) {
         log("🔗 Connected to \(peripheral.name ?? "band")")
-        DispatchQueue.main.async { self.statusText = "BLE: Discovering…" }
+        setStatus("Band: Discovering…")
         peripheral.discoverServices([BandBLE.serviceUUID])
     }
 
     func centralManager(_ central: CBCentralManager,
                         didFailToConnect peripheral: CBPeripheral,
                         error: Error?) {
-        log("❌ Failed to connect: \(error?.localizedDescription ?? "unknown")")
-        updateConnectedState(false)
+        log("❌ Failed: \(error?.localizedDescription ?? "?")")
+        setConnected(false)
         reconnectAfterDelay()
     }
 
     func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
-        log("🔌 Disconnected from \(peripheral.name ?? "band"): \(error?.localizedDescription ?? "clean")")
+        log("🔌 Disconnected: \(error?.localizedDescription ?? "clean")")
         gestureCharacteristic = nil
         self.peripheral = nil
-        updateConnectedState(false)
+        setConnected(false)
         reconnectAfterDelay()
     }
 
-    // MARK: State restoration
-
-    func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
-        if let peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral],
-           let restored = peripherals.first {
-            log("♻️ Restoring peripheral: \(restored.name ?? "unknown")")
-            self.peripheral = restored
-            restored.delegate = self
-            if restored.state == .connected {
-                restored.discoverServices([BandBLE.serviceUUID])
-            } else {
-                central.connect(restored, options: nil)
-            }
+    func centralManager(_ central: CBCentralManager,
+                        willRestoreState dict: [String: Any]) {
+        guard let restored = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first
+        else { return }
+        log("♻️ Restoring: \(restored.name ?? "peripheral")")
+        self.peripheral = restored
+        restored.delegate = self
+        if restored.state == .connected {
+            restored.discoverServices([BandBLE.serviceUUID])
+        } else {
+            central.connect(restored, options: nil)
         }
     }
 }
@@ -220,38 +219,28 @@ extension BandBLEManager: CBCentralManagerDelegate {
 
 extension BandBLEManager: CBPeripheralDelegate {
 
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        if let error = error {
-            log("❌ Service discovery error: \(error.localizedDescription)")
-            return
-        }
-        guard let services = peripheral.services else { return }
-        for service in services where service.uuid == BandBLE.serviceUUID {
-            log("🔎 Discovered FFF0 service — looking for FFF1 characteristic…")
-            peripheral.discoverCharacteristics([BandBLE.gestureCharUUID], for: service)
-        }
+    func peripheral(_ peripheral: CBPeripheral,
+                    didDiscoverServices error: Error?) {
+        if let err = error { log("❌ Services: \(err)"); return }
+        peripheral.services?
+            .filter { $0.uuid == BandBLE.serviceUUID }
+            .forEach { peripheral.discoverCharacteristics([BandBLE.gestureCharUUID], for: $0) }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
-        if let error = error {
-            log("❌ Characteristic discovery error: \(error.localizedDescription)")
-            return
-        }
-        guard let characteristics = service.characteristics else { return }
-        for characteristic in characteristics where characteristic.uuid == BandBLE.gestureCharUUID {
-            gestureCharacteristic = characteristic
-            updateConnectedState(true)
-            log("✅ Gesture characteristic ready — band fully connected")
+        if let err = error { log("❌ Chars: \(err)"); return }
+        if let char = service.characteristics?.first(where: { $0.uuid == BandBLE.gestureCharUUID }) {
+            gestureCharacteristic = char
+            setConnected(true)
+            log("✅ Ready — band fully online")
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didWriteValueFor characteristic: CBCharacteristic,
                     error: Error?) {
-        if let error = error {
-            log("❌ Write error: \(error.localizedDescription)")
-        }
+        if let err = error { log("❌ Write: \(err)") }
     }
 }
