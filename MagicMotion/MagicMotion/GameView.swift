@@ -44,7 +44,7 @@ struct GameView: View {
                     Text("MotionMind").font(.caption.bold()).foregroundColor(.cyan)
                     Spacer()
                     if case .active = session.state {
-                        Text("Score: \(session.player.score)").font(.caption.bold()).foregroundColor(.white)
+                        Text("Score: \(session.score)").font(.caption.bold()).foregroundColor(.white)
                     }
                 }
                 .padding(10)
@@ -143,7 +143,7 @@ struct GameView: View {
                 roadLanes
                 
                 // Obstacles
-                ForEach(session.player.obstacles) { obstacle in
+                ForEach(session.obstacles) { obstacle in
                     ObstacleView(obstacle: obstacle)
                         .position(
                             x: laneXPosition(obstacle.lane, in: geo.size),
@@ -152,7 +152,7 @@ struct GameView: View {
                 }
 
                 // Coins
-                ForEach(session.player.coins) { coin in
+                ForEach(session.coins) { coin in
                     CoinView()
                         .position(
                             x: laneXPosition(coin.lane, in: geo.size),
@@ -170,7 +170,7 @@ struct GameView: View {
                 // HUD
                 VStack {
                     HStack {
-                        Text("Score: \(session.player.score)")
+                        Text("Score: \(session.score)")
                             .font(.title2.bold())
                             .foregroundColor(.white)
                             .padding(10)
@@ -179,7 +179,7 @@ struct GameView: View {
 
                         Spacer()
 
-                        Text("Distance: \(session.player.distance)m")
+                        Text("Distance: \(session.distance)m")
                             .font(.title3)
                             .foregroundColor(.white)
                             .padding(10)
@@ -193,13 +193,13 @@ struct GameView: View {
         }
     }
 
-    private func pausedScreen(_ reason: String) -> some View {
+    private func pausedScreen(_ reason: PauseReason) -> some View {
         VStack(spacing: 20) {
             Text("⏸️ PAUSED")
                 .font(.title.bold())
                 .foregroundColor(.orange)
 
-            Text(reason)
+            Text(reason == .trackingLost ? "Tracking lost — step back into view" : "App backgrounded")
                 .font(.body)
                 .foregroundColor(.white.opacity(0.8))
 
@@ -237,11 +237,11 @@ struct GameView: View {
                 .font(.system(size: 60, weight: .black))
                 .foregroundColor(.red)
 
-            Text("Score: \(session.player.score)")
+            Text("Score: \(session.score)")
                 .font(.title.bold())
                 .foregroundColor(.white)
 
-            Text("Distance: \(session.player.distance)m")
+            Text("Distance: \(session.distance)m")
                 .font(.title2)
                 .foregroundColor(.white)
 
