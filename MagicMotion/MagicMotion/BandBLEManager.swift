@@ -13,6 +13,14 @@
 //   0x03 jump       → SPACEBAR
 //   0x04 squat      → DOWN_ARROW
 //   0xFF endSession → band resets
+//
+// Concurrency note:
+//   This project sets SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor, which means
+//   every type is @MainActor by default.  BandBLEManager opts out with
+//   `nonisolated(unsafe)` on its CBCentral/CBPeripheral stored properties so
+//   that CoreBluetooth can call delegate methods from its own queue without
+//   actor-isolation violations.  All @Published mutations hop back to the
+//   main actor explicitly.
 
 import CoreBluetooth
 import Foundation
@@ -29,23 +37,23 @@ private enum BandBLE {
 // MARK: - BandBLEManager
 
 /// Manages the CoreBluetooth Central role for the MotionMind wrist band.
-/// All @Published mutations are dispatched to the main thread.
-/// The app degrades gracefully when the band is off — sends are no-ops.
+/// Gracefully degrades — all sends are no-ops when the band is off.
+@MainActor
 final class BandBLEManager: NSObject, ObservableObject {
 
-    // MARK: - Published state
+    // MARK: - Published state (always mutated on MainActor)
 
-    /// true once the gesture characteristic is ready to accept writes.
     @Published private(set) var isConnected: Bool = false
-
-    /// Human-readable status for the status bar / debug panel.
     @Published private(set) var statusText: String = "Band: Off"
 
     // MARK: - Private CoreBluetooth
+    // nonisolated(unsafe): accessed from both the MainActor (init, send*)
+    // and the BLE queue (delegate callbacks). CoreBluetooth serialises its
+    // own callbacks; we never race on these from two non-BLE threads.
 
-    private var centralManager: CBCentralManager!
-    private var peripheral: CBPeripheral?
-    private var gestureCharacteristic: CBCharacteristic?
+    nonisolated(unsafe) private var centralManager: CBCentralManager!
+    nonisolated(unsafe) private var peripheral: CBPeripheral?
+    nonisolated(unsafe) private var gestureCharacteristic: CBCharacteristic?
 
     // MARK: - Init
 
@@ -58,7 +66,7 @@ final class BandBLEManager: NSObject, ObservableObject {
         )
     }
 
-    // MARK: - Public API
+    // MARK: - Public API (called from MainActor / SwiftUI)
 
     /// Send a MotionEvent to the band. No-op when not connected or unmapped.
     func send(event: MotionEvent) {
@@ -80,11 +88,11 @@ final class BandBLEManager: NSObject, ObservableObject {
     /// Convenience bridge from the app's Gesture enum.
     func send(gesture: Gesture) {
         switch gesture {
-        case .swipeLeft:        send(event: .leanLeft)
-        case .swipeRight:       send(event: .leanRight)
-        case .jump, .swipeUp:  send(event: .jump)
-        case .swipeDown:        send(event: .squat)
-        case .none:             break
+        case .swipeLeft:       send(event: .leanLeft)
+        case .swipeRight:      send(event: .leanRight)
+        case .jump, .swipeUp: send(event: .jump)
+        case .swipeDown:       send(event: .squat)
+        case .none:            break
         }
     }
 
@@ -99,7 +107,7 @@ final class BandBLEManager: NSObject, ObservableObject {
 
     // MARK: - Private helpers
 
-    private func startScan() {
+    nonisolated private func startScan() {
         guard centralManager.state == .poweredOn, !centralManager.isScanning else { return }
         setStatus("Band: Scanning…")
         centralManager.scanForPeripherals(
@@ -109,28 +117,29 @@ final class BandBLEManager: NSObject, ObservableObject {
         log("🔍 Scanning for MotionMind band…")
     }
 
-    private func stopScan() {
+    nonisolated private func stopScan() {
         if centralManager.isScanning { centralManager.stopScan() }
     }
 
-    private func reconnectAfterDelay() {
+    nonisolated private func reconnectAfterDelay() {
         DispatchQueue.global().asyncAfter(deadline: .now() + BandBLE.reconnectDelay) { [weak self] in
             self?.startScan()
         }
     }
 
-    private func setConnected(_ connected: Bool) {
-        DispatchQueue.main.async { [weak self] in
+    /// Hop to MainActor to mutate @Published properties.
+    nonisolated private func setConnected(_ connected: Bool) {
+        Task { @MainActor [weak self] in
             self?.isConnected = connected
             self?.statusText  = connected ? "Band ✓" : "Band: Disconnected"
         }
     }
 
-    private func setStatus(_ text: String) {
-        DispatchQueue.main.async { [weak self] in self?.statusText = text }
+    nonisolated private func setStatus(_ text: String) {
+        Task { @MainActor [weak self] in self?.statusText = text }
     }
 
-    private func log(_ msg: String) {
+    nonisolated private func log(_ msg: String) {
 #if DEBUG
         print("[BandBLEManager] \(msg)")
 #endif
@@ -141,7 +150,7 @@ final class BandBLEManager: NSObject, ObservableObject {
 
 extension BandBLEManager: CBCentralManagerDelegate {
 
-    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+    nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
             log("✅ Bluetooth on — scanning")
@@ -159,10 +168,10 @@ extension BandBLEManager: CBCentralManagerDelegate {
         }
     }
 
-    func centralManager(_ central: CBCentralManager,
-                        didDiscover peripheral: CBPeripheral,
-                        advertisementData: [String: Any],
-                        rssi RSSI: NSNumber) {
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                    didDiscover peripheral: CBPeripheral,
+                                    advertisementData: [String: Any],
+                                    rssi RSSI: NSNumber) {
         let name = peripheral.name
             ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
             ?? ""
@@ -175,24 +184,24 @@ extension BandBLEManager: CBCentralManagerDelegate {
         setStatus("Band: Connecting…")
     }
 
-    func centralManager(_ central: CBCentralManager,
-                        didConnect peripheral: CBPeripheral) {
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                    didConnect peripheral: CBPeripheral) {
         log("🔗 Connected to \(peripheral.name ?? "band")")
         setStatus("Band: Discovering…")
         peripheral.discoverServices([BandBLE.serviceUUID])
     }
 
-    func centralManager(_ central: CBCentralManager,
-                        didFailToConnect peripheral: CBPeripheral,
-                        error: Error?) {
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                    didFailToConnect peripheral: CBPeripheral,
+                                    error: Error?) {
         log("❌ Failed: \(error?.localizedDescription ?? "?")")
         setConnected(false)
         reconnectAfterDelay()
     }
 
-    func centralManager(_ central: CBCentralManager,
-                        didDisconnectPeripheral peripheral: CBPeripheral,
-                        error: Error?) {
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                    didDisconnectPeripheral peripheral: CBPeripheral,
+                                    error: Error?) {
         log("🔌 Disconnected: \(error?.localizedDescription ?? "clean")")
         gestureCharacteristic = nil
         self.peripheral = nil
@@ -200,8 +209,8 @@ extension BandBLEManager: CBCentralManagerDelegate {
         reconnectAfterDelay()
     }
 
-    func centralManager(_ central: CBCentralManager,
-                        willRestoreState dict: [String: Any]) {
+    nonisolated func centralManager(_ central: CBCentralManager,
+                                    willRestoreState dict: [String: Any]) {
         guard let restored = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first
         else { return }
         log("♻️ Restoring: \(restored.name ?? "peripheral")")
@@ -219,17 +228,17 @@ extension BandBLEManager: CBCentralManagerDelegate {
 
 extension BandBLEManager: CBPeripheralDelegate {
 
-    func peripheral(_ peripheral: CBPeripheral,
-                    didDiscoverServices error: Error?) {
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didDiscoverServices error: Error?) {
         if let err = error { log("❌ Services: \(err)"); return }
         peripheral.services?
             .filter { $0.uuid == BandBLE.serviceUUID }
             .forEach { peripheral.discoverCharacteristics([BandBLE.gestureCharUUID], for: $0) }
     }
 
-    func peripheral(_ peripheral: CBPeripheral,
-                    didDiscoverCharacteristicsFor service: CBService,
-                    error: Error?) {
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didDiscoverCharacteristicsFor service: CBService,
+                                error: Error?) {
         if let err = error { log("❌ Chars: \(err)"); return }
         if let char = service.characteristics?.first(where: { $0.uuid == BandBLE.gestureCharUUID }) {
             gestureCharacteristic = char
@@ -238,9 +247,9 @@ extension BandBLEManager: CBPeripheralDelegate {
         }
     }
 
-    func peripheral(_ peripheral: CBPeripheral,
-                    didWriteValueFor characteristic: CBCharacteristic,
-                    error: Error?) {
+    nonisolated func peripheral(_ peripheral: CBPeripheral,
+                                didWriteValueFor characteristic: CBCharacteristic,
+                                error: Error?) {
         if let err = error { log("❌ Write: \(err)") }
     }
 }
