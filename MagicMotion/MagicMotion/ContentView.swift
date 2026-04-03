@@ -30,6 +30,9 @@ struct ContentView: View {
     @StateObject private var displayManager = ExternalDisplayManager()
     @StateObject private var gameLauncher = GameLauncher.shared
 
+    // MARK: - BLE Band
+    @StateObject private var band = BandBLEManager()
+
     // MARK: - Layer 6: Diagnostics
     #if DEBUG
     @State private var useSyntheticInput = true  // ← DEBUG MODE: Using FakeMotionSource (no camera needed)
@@ -177,6 +180,11 @@ struct ContentView: View {
                     label: "Monitor",
                     active: displayManager.isExternalDisplayConnected
                 )
+                statusIndicator(
+                    icon: "antenna.radiowaves.left.and.right",
+                    label: "Band",
+                    active: band.isConnected
+                )
                 Spacer()
                 Text(sessionStateLabel(session.state))
                     .font(.caption.bold())
@@ -269,9 +277,10 @@ struct ContentView: View {
         // Layer 2 → 3: Wire MotionEngine to MotionInterpreter
         motionEngine.delegate = interpreter
 
-        // Layer 3 → 4: Wire MotionInterpreter to GameSession + Logger
-        interpreter.onMotionEvent = { [weak session] event in
+        // Layer 3 → 4: Wire MotionInterpreter to GameSession + Logger + BLE Band
+        interpreter.onMotionEvent = { [weak session, weak band] event in
             session?.handle(event: event)
+            band?.send(event: event)
         }
 
         // Wire logger: every snapshot goes to MotionSessionLogger
