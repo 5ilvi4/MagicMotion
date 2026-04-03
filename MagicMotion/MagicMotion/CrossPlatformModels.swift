@@ -3,7 +3,7 @@ import AVFoundation
 
 /// Universal PoseFrame model - designed for cross-platform porting
 /// This same struct can be ported to Kotlin, TypeScript, C++ with zero logic changes
-public struct PoseFrame: Codable {
+public struct CPPoseFrame: Codable {
     /// 33 MediaPipe landmarks (nose, shoulders, elbows, wrists, hips, knees, ankles, etc.)
     public let landmarks: [Landmark]
     
@@ -178,10 +178,10 @@ public protocol PoseDetectorProtocol {
     init(modelPath: String) throws
     
     /// Detect pose in image
-    func detect(image: ImageType) -> PoseFrame?
+    func detect(image: ImageType) -> CPPoseFrame?
     
     /// Detect pose asynchronously
-    func detectAsync(image: ImageType, completion: @escaping (PoseFrame?) -> Void)
+    func detectAsync(image: ImageType, completion: @escaping (CPPoseFrame?) -> Void)
     
     /// Clean up resources
     func stop()
@@ -201,7 +201,7 @@ open class GestureClassifier {
     public init() {}
     
     /// Classify gesture from pose frame - override in subclasses
-    open func classify(frame: PoseFrame) -> Gesture? {
+    open func classify(frame: CPPoseFrame) -> CPGesture? {
         // Subclasses implement gesture-specific logic
         // This keeps the interface platform-agnostic
         nil
@@ -215,7 +215,7 @@ open class GestureClassifier {
     }
     
     /// Check if pose is valid for gesture recognition
-    public func isPoseValid(_ frame: PoseFrame) -> Bool {
+    public func isPoseValid(_ frame: CPPoseFrame) -> Bool {
         // Must have at least 20 visible landmarks
         let visibleCount = frame.landmarks.filter { $0.isVisible }.count
         return visibleCount >= 20 && frame.confidence > confidenceThreshold
@@ -238,7 +238,7 @@ open class GestureClassifier {
 }
 
 /// Platform-independent gesture enum
-public enum Gesture: String, Codable, Equatable {
+public enum CPGesture: String, Codable, Equatable {
     // Movement gestures
     case idle
     case swipeLeft
@@ -287,7 +287,7 @@ public enum Gesture: String, Codable, Equatable {
 
 /// Cross-platform game command generated from gestures
 public struct GameCommand: Codable {
-    public let gesture: Gesture
+    public let gesture: CPGesture
     public let timestamp: TimeInterval
     public let confidence: Float
     
@@ -310,7 +310,7 @@ public struct GameCommand: Codable {
         }
     }
     
-    public init(gesture: Gesture, timestamp: TimeInterval = Date().timeIntervalSince1970, confidence: Float = 1.0) {
+    public init(gesture: CPGesture, timestamp: TimeInterval = Date().timeIntervalSince1970, confidence: Float = 1.0) {
         self.gesture = gesture
         self.timestamp = timestamp
         self.confidence = confidence
