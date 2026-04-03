@@ -17,10 +17,21 @@
 		E1A6A2255B237F87A240324C /* Pods-MagicMotion.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-MagicMotion.release.xcconfig"; path = "Target Support Files/Pods-MagicMotion/Pods-MagicMotion.release.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = D8A412CB2F7354450048488C /* MagicMotion */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D8A412CE2F7354450048488C /* MagicMotion */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
 			);
 			path = MagicMotion;
 			sourceTree = "<group>";
