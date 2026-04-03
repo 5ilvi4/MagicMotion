@@ -20,21 +20,9 @@
 		T1000003T1000003T1000003 /* MagicMotionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MagicMotionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		A1B2C3D4E5F6A7B8C9D0E1F2 /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-			);
-			target = D8A412CB2F7354450048488C /* MagicMotion */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D8A412CE2F7354450048488C /* MagicMotion */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				A1B2C3D4E5F6A7B8C9D0E1F2 /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
-			);
 			path = MagicMotion;
 			sourceTree = "<group>";
 		};
@@ -399,8 +387,14 @@
 				ENABLE_BITCODE = NO;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = MagicMotion/Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to detect your body movements for gesture control";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "MagicMotion uses Bluetooth to send gesture commands to the MotionMind wrist band, including while the app is in the background.";
+				INFOPLIST_KEY_NSBluetoothCentralUsageDescription = "MotionMind uses Bluetooth to communicate with your motion band for gesture control during gameplay.";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "MotionMind broadcasts motion data via Bluetooth for research and clinical assessment.";
+				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central bluetooth-peripheral";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -433,8 +427,14 @@
 				ENABLE_BITCODE = NO;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "$(inherited)";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = MagicMotion/Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to detect your body movements for gesture control";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "MagicMotion uses Bluetooth to send gesture commands to the MotionMind wrist band, including while the app is in the background.";
+				INFOPLIST_KEY_NSBluetoothCentralUsageDescription = "MotionMind uses Bluetooth to communicate with your motion band for gesture control during gameplay.";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "MotionMind broadcasts motion data via Bluetooth for research and clinical assessment.";
+				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central bluetooth-peripheral";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
