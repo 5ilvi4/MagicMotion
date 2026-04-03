@@ -17,6 +17,7 @@ struct ContentView: View {
     @StateObject private var cameraManager      = CameraManager()
     @StateObject private var gestureClassifier  = GestureClassifier()
     @StateObject private var airPlayManager     = AirPlayManager()
+    @StateObject private var band               = BandBLEManager()
 
     // PoseDetector and TouchInjector don't need @StateObject because they don't
     // publish @Published properties we observe directly in this view.
@@ -111,6 +112,16 @@ struct ContentView: View {
                             .font(.caption2)
                             .foregroundColor(.cyan)
                     }
+
+                    // Band status — green when connected, yellow while searching
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(band.isConnected ? Color.green : Color.yellow)
+                            .frame(width: 8, height: 8)
+                        Text(band.isConnected ? "Band ✓" : band.statusText)
+                            .font(.caption2)
+                            .foregroundColor(band.isConnected ? .green : .white.opacity(0.7))
+                    }
                 }
                 .padding(10)
                 .background(Color.black.opacity(0.55))
@@ -150,8 +161,10 @@ struct ContentView: View {
         }
 
         // Step 3: Gesture classifier fires confirmed gestures to the touch injector
-        gestureClassifier.onGestureDetected = { [touchInjector] gesture in
-            touchInjector.inject(gesture: gesture)
+        // AND to the BLE band (which translates bytes into HID keystrokes for the game)
+        gestureClassifier.onGestureDetected = { [touchInjector, band] gesture in
+            touchInjector.inject(gesture: gesture)   // keep existing notification path
+            band.send(gesture: gesture)               // NEW: also write to band via BLE
         }
     }
 }

@@ -9,10 +9,25 @@ KEY:   NSCameraUsageDescription
 TYPE:  String
 VALUE: SubwaySurferMotion needs your front camera to track body pose for gesture control.
 
+KEY:   NSBluetoothAlwaysUsageDescription
+TYPE:  String
+VALUE: MagicMotion uses Bluetooth to send gesture commands to the MotionMind wrist band.
+
+KEY:   NSBluetoothCentralUsageDescription
+TYPE:  String
+VALUE: MagicMotion uses Bluetooth to communicate with your motion band for gesture control.
+
 KEY:   UIRequiresFullScreen
 TYPE:  Boolean
 VALUE: YES
 (This prevents iPadOS Split View, which can interfere with full-screen camera)
+
+──────────────────────────────────────────────────────────────────────────────
+BACKGROUND MODES (Signing & Capabilities tab → Background Modes)
+──────────────────────────────────────────────────────────────────────────────
+
+Enable: Uses Bluetooth LE accessories
+        (adds "bluetooth-central" to UIBackgroundModes in Info.plist)
 
 ──────────────────────────────────────────────────────────────────────────────
 CAPABILITIES TO ENABLE (in Xcode → your Target → Signing & Capabilities)
