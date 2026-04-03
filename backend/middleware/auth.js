@@ -44,19 +44,23 @@ async function authenticateToken(req, res, next) {
 
 // ── Verify therapist owns the player resource ──────────────────
 async function authorizeTherapist(req, res, next) {
-    const { Player } = require('../models');
-    const playerID   = req.params.playerID || req.body.playerID;
+    try {
+        const { Player } = require('../models');
+        const playerID   = req.params.playerID || req.body.playerID;
 
-    if (!playerID) return next();
+        if (!playerID) return next();
 
-    const player = await Player.findByPk(playerID, { attributes: ['therapistID'] });
-    if (!player) {
-        return res.status(404).json({ error: 'Player not found' });
+        const player = await Player.findByPk(playerID, { attributes: ['therapistID'] });
+        if (!player) {
+            return res.status(404).json({ error: 'Player not found' });
+        }
+        if (player.therapistID !== req.user.therapistID) {
+            return res.status(403).json({ error: 'Access denied', code: 'FORBIDDEN' });
+        }
+        next();
+    } catch (err) {
+        next(err);
     }
-    if (player.therapistID !== req.user.therapistID) {
-        return res.status(403).json({ error: 'Access denied', code: 'FORBIDDEN' });
-    }
-    next();
 }
 
 // ── Rate limiter: 100 uploads / therapist / day ────────────────

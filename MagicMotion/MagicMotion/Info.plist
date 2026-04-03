@@ -9,8 +9,6 @@
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>MotionMind broadcasts motion data via Bluetooth for research and clinical assessment.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>MagicMotion uses Bluetooth to send gesture commands to the MotionMind wrist band.</string>
-	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>MagicMotion uses Bluetooth to send gesture commands to the MotionMind wrist band, including while the app is in the background.</string>
 	<key>UIBackgroundModes</key>
 	<array>

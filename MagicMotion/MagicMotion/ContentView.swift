@@ -264,9 +264,9 @@ struct ContentView: View {
         case .calibrating:         return "Calibrating"
         case .countdown(let n):    return "Countdown: \(n)"
         case .active:              return "▶️ Playing"
-        case .paused(let reason):  return "⏸️ Paused (\(reason))"
-        case .roundOver:           return "Game Over"
-        case .completed(let score):return "✅ Done (\(score))"
+        case .paused(let reason):      return "⏸️ Paused (\(reason))"
+        case .roundOver(let score):    return "Game Over (\(score))"
+        case .completed(let score):    return "✅ Done (\(score))"
         }
     }
 
@@ -382,48 +382,4 @@ struct ContentView_Previews: PreviewProvider {
 }
 #endif
 
-// MARK: - CameraPreviewRepresentable
 
-/// Bridges AVCaptureVideoPreviewLayer (UIKit) into SwiftUI.
-///
-/// SwiftUI can't use AVCaptureVideoPreviewLayer directly, so we wrap it in a
-/// UIView and use UIViewRepresentable to drop it into our SwiftUI layout.
-struct CameraPreviewRepresentable: UIViewRepresentable {
-
-    let cameraManager: CameraManager
-
-    /// makeUIView is called ONCE when the view first appears.
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.backgroundColor = .black
-        return view
-    }
-
-    /// updateUIView is called every time SwiftUI re-renders this representable.
-    func updateUIView(_ uiView: UIView, context: Context) {
-        guard let previewLayer = cameraManager.previewLayer else { return }
-
-        // Attach the preview layer to this view the first time we see it
-        if previewLayer.superlayer == nil {
-            uiView.layer.addSublayer(previewLayer)
-        }
-
-        // Always keep the preview layer sized to fill the UIView
-        // (CALayer doesn't auto-resize with its parent — we must do it manually)
-        DispatchQueue.main.async {
-            previewLayer.frame = uiView.bounds
-        }
-    }
-}
-
-// MARK: - Xcode Preview
-
-#if DEBUG
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-            .previewDevice("iPad Air (5th generation)")
-            .previewInterfaceOrientation(.portrait)
-    }
-}
-#endif

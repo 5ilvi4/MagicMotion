@@ -7,6 +7,13 @@
 
 require('dotenv').config();
 
+// ── Required env var validation ───────────────────────────────
+// Fail fast at startup rather than cryptically at runtime.
+const REQUIRED_ENV = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'DATABASE_URL', 'REDIS_URL', 'CORS_ORIGIN'];
+REQUIRED_ENV.forEach(key => {
+    if (!process.env[key]) throw new Error(`Missing required env var: ${key}`);
+});
+
 const express    = require('express');
 const helmet     = require('helmet');
 const cors       = require('cors');
@@ -21,7 +28,7 @@ const app = express();
 // ── Security & Transport Middleware ──────────────────────────
 app.use(helmet());
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: process.env.CORS_ORIGIN,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));

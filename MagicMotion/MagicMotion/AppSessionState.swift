@@ -28,7 +28,7 @@ class AppSessionState: ObservableObject {
     @Published var calibrationState: CalibrationState = .notStarted
     @Published var trackingState: TrackingState = .notReady
     @Published var error: String? = nil
-    var cancellables = Set<AnyCancellable>()
+    private var cancellables = Set<AnyCancellable>()
 
     // --- Tuning thresholds (operator adjustable in debug) ---
     @Published var confidenceThreshold: Float = 0.5

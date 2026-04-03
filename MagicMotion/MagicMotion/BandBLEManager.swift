@@ -3,6 +3,12 @@
 //
 // CoreBluetooth Central manager for the MotionMind wrist band.
 //
+// ── Gesture delivery mechanism ────────────────────────────────
+// Touch injection is NOT done via UIKit private APIs or TouchInjector.
+// Instead: iPad → BLE (this file) → band firmware → USB HID (GameController
+// framework / HIDGamepad.h) → OS routes keystrokes to the foreground game.
+// This is the only App Store–safe, latency-acceptable mechanism.
+//
 // GATT layout (mirrors band-firmware/BLEGATTServer.h):
 //   Service  0000fff0-0000-1000-8000-00805f9b34fb
 //   Char     0000fff1-0000-1000-8000-00805f9b34fb  (write-without-response)
@@ -55,6 +61,7 @@ final class BandBLEManager: NSObject, ObservableObject {
     nonisolated(unsafe) private var centralManager: CBCentralManager!
     nonisolated(unsafe) private var peripheral: CBPeripheral?
     nonisolated(unsafe) private var gestureCharacteristic: CBCharacteristic?
+    nonisolated(unsafe) private let bleQueue = DispatchQueue(label: "com.magicmotion.ble", qos: .userInitiated)
 
     // MARK: - Init
 
@@ -62,7 +69,7 @@ final class BandBLEManager: NSObject, ObservableObject {
         super.init()
         centralManager = CBCentralManager(
             delegate: self,
-            queue: DispatchQueue(label: "com.magicmotion.ble", qos: .userInitiated),
+            queue: bleQueue,
             options: [CBCentralManagerOptionRestoreIdentifierKey: "MagicMotionBand"]
         )
     }
@@ -82,8 +89,14 @@ final class BandBLEManager: NSObject, ObservableObject {
         case .squat:     byte = 0x04
         default:         return
         }
-        peripheral.writeValue(Data([byte]), for: characteristic, type: .withoutResponse)
-        log("📡 \(event.displayName) → 0x\(String(format: "%02X", byte))")
+        // Capture locals before crossing actor boundary; dispatch write on BLE queue
+        // to avoid nonisolated(unsafe) data race on CBPeripheral.
+        let data = Data([byte])
+        let eventName = event.displayName
+        bleQueue.async {
+            peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+        }
+        log("📡 \(eventName) → 0x\(String(format: "%02X", byte))")
     }
 
     /// Convenience bridge from the app's Gesture enum.
@@ -102,7 +115,9 @@ final class BandBLEManager: NSObject, ObservableObject {
         guard isConnected,
               let peripheral = peripheral,
               let characteristic = gestureCharacteristic else { return }
-        peripheral.writeValue(Data([0xFF]), for: characteristic, type: .withoutResponse)
+        bleQueue.async {
+            peripheral.writeValue(Data([0xFF]), for: characteristic, type: .withoutResponse)
+        }
         log("📡 END_SESSION → 0xFF")
     }
 

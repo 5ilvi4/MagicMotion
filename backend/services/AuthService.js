@@ -25,14 +25,19 @@ class AuthService {
     static signRefreshToken(therapist) {
         return jwt.sign(
             { therapistID: therapist.therapistID, type: 'refresh' },
-            process.env.JWT_SECRET,
+            process.env.JWT_REFRESH_SECRET,
             { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
         );
     }
 
-    // ── Verify any token ─────────────────────────────────────
+    // ── Verify a token — use correct secret by type ───────────
     static verifyToken(token) {
-        return jwt.verify(token, process.env.JWT_SECRET);
+        // Decode header without verification to detect token type
+        const decoded = jwt.decode(token);
+        const secret = decoded?.type === 'refresh'
+            ? process.env.JWT_REFRESH_SECRET
+            : process.env.JWT_SECRET;
+        return jwt.verify(token, secret);
     }
 
     // ── Email / password login ────────────────────────────────

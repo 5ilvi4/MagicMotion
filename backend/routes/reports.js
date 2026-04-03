@@ -9,16 +9,19 @@ const express  = require('express');
 const router   = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const PDFDocument = require('pdfkit');
-const AWS      = require('aws-sdk');
+const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const { Session, Metrics, Gesture, Player, Report } = require('../models');
 const { authenticateToken } = require('../middleware/auth');
 const logger = require('../services/LoggerService');
 
-const s3 = new AWS.S3({
-    region:          process.env.AWS_REGION,
-    accessKeyId:     process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+const s3 = new S3Client({
+    region: process.env.AWS_REGION,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    }
 });
 
 // ── POST /api/reports/generate/:sessionID ────────────────────
@@ -41,13 +44,13 @@ router.post('/generate/:sessionID', authenticateToken, async (req, res, next) =>
 
         // Upload to S3
         const key = `reports/${session.playerID}/${session.sessionID}/${reportID}.pdf`;
-        await s3.putObject({
+        await s3.send(new PutObjectCommand({
             Bucket:      process.env.AWS_S3_BUCKET,
             Key:         key,
             Body:        pdfBuffer,
             ContentType: 'application/pdf',
-            ServerSideEncryption: 'AES256'      // Encryption at rest (HIPAA)
-        }).promise();
+            ServerSideEncryption: 'AES256'
+        }));
 
         const contentURL = `https://${process.env.AWS_S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
 
@@ -84,11 +87,8 @@ router.get('/:reportID', authenticateToken, async (req, res, next) => {
 
         // Parse S3 key from full URL
         const key = report.contentURL.split('.amazonaws.com/')[1];
-        const signedURL = s3.getSignedUrl('getObject', {
-            Bucket:  process.env.AWS_S3_BUCKET,
-            Key:     key,
-            Expires: 900   // 15 minutes
-        });
+        const command = new GetObjectCommand({ Bucket: process.env.AWS_S3_BUCKET, Key: key });
+        const signedURL = await getSignedUrl(s3, command, { expiresIn: 900 });
 
         await authenticateToken.audit(req, 'download_report', 'report', report.reportID);
 
