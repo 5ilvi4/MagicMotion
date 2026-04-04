@@ -37,7 +37,7 @@ import Foundation
 private enum BandBLE {
     static let serviceUUID     = CBUUID(string: "0000fff0-0000-1000-8000-00805f9b34fb")
     static let gestureCharUUID = CBUUID(string: "0000fff1-0000-1000-8000-00805f9b34fb")
-    static let deviceNameMatch = "MotionMind"
+    static let deviceNameMatch = "MotionMind_IMU"
     static let reconnectDelay: TimeInterval = 3.0
 }
 
@@ -52,6 +52,8 @@ final class BandBLEManager: NSObject, ObservableObject {
 
     @Published private(set) var isConnected: Bool = false
     @Published private(set) var statusText: String = "Band: Off"
+    /// Last GameCommand successfully handed to the BLE write path. Nil until first send attempt.
+    @Published private(set) var lastSentCommand: GameCommand?
 
     // MARK: - Private CoreBluetooth
     // nonisolated(unsafe): accessed from both the MainActor (init, send*)
@@ -107,6 +109,31 @@ final class BandBLEManager: NSObject, ObservableObject {
         case .jump, .swipeUp: send(event: .jump)
         case .swipeDown:       send(event: .squat)
         case .none:            break
+        }
+    }
+
+    /// Send a GameCommand produced by GameProfileManager.
+    /// lastSentCommand is only updated when the byte is actually handed to the BLE queue.
+    func send(command: GameCommand) {
+        guard isConnected,
+              let peripheral = peripheral,
+              let characteristic = gestureCharacteristic else { return }
+        let data = Data([command.rawValue])
+        lastSentCommand = command
+        bleQueue.async {
+            peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+        }
+        log("📡 \(command.displayName) → 0x\(String(format: "%02X", command.rawValue))")
+    }
+
+    /// Low-level send: write a single byte to the band characteristic.
+    func send(rawByte byte: UInt8) {
+        guard isConnected,
+              let peripheral = peripheral,
+              let characteristic = gestureCharacteristic else { return }
+        let data = Data([byte])
+        bleQueue.async {
+            peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
         }
     }
 
@@ -191,7 +218,7 @@ extension BandBLEManager: CBCentralManagerDelegate {
         let name = peripheral.name
             ?? (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
             ?? ""
-        guard name.contains(BandBLE.deviceNameMatch) else { return }
+        guard name == BandBLE.deviceNameMatch else { return }
         log("📡 Found: \(name) — connecting…")
         stopScan()
         self.peripheral = peripheral

@@ -1,0 +1,10 @@
+{
+  "gameID": "crossyRoad",
+  "displayName": "Crossy Road",
+  "mapping": {
+    "leanLeft":  1,
+    "leanRight": 2,
+    "handsUp":   3,
+    "handsDown": 4
+  }
+}

@@ -33,12 +33,13 @@ struct ContentView: View {
     // MARK: - BLE Band
     @StateObject private var band = BandBLEManager()
 
+    // MARK: - Game Profile
+    @StateObject private var profileManager = GameProfileManager()
+
     // MARK: - Layer 6: Diagnostics
     #if DEBUG
     @State private var useSyntheticInput = true  // ← DEBUG MODE: Using FakeMotionSource (no camera needed)
     @State private var debugMode = true  // ← Auto-enable debug panel
-    @State private var currentSnapshot: PoseSnapshot? = nil
-    @State private var fpsCounter: Double = 0.0
     private let fakeSource = FakeMotionSource()
     #endif
 
@@ -92,10 +93,16 @@ struct ContentView: View {
     private var fallbackLayout: some View {
         VStack(spacing: 12) {
             #if DEBUG
-            // In DEBUG mode with synthetic input, show full game
+            // In DEBUG mode with synthetic input, show full game + debug panel overlay
             if useSyntheticInput {
-                GameView(session: session)
-                    .ignoresSafeArea()
+                ZStack(alignment: .top) {
+                    GameView(session: session)
+                        .ignoresSafeArea()
+                    if debugMode {
+                        debugPanel
+                            .padding()
+                    }
+                }
             } else {
                 // With real camera, show camera preview + game
                 CameraPreviewRepresentable(cameraManager: frameSource)
@@ -146,14 +153,68 @@ struct ContentView: View {
                 }
             }
 
-            if let snap = currentSnapshot {
-                HStack {
-                    Text("Conf: \(Int(snap.trackingConfidence * 100))%")
-                    Text("Event: \(interpreter.currentEvent.displayName)")
-                    Text("FPS: \(String(format: "%.0f", fpsCounter))")
+            // Row 1: live MotionEvent + unmapped indicator
+            HStack {
+                Text("Event: \(interpreter.currentEvent.displayName)")
+                    .foregroundColor(interpreter.currentEvent == .none ? .gray : .cyan)
+                Spacer()
+                if let miss = profileManager.lastUnmappedEvent {
+                    Text("⚠️ \(miss.displayName)")
+                        .foregroundColor(.red.opacity(0.75))
                 }
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(.cyan)
+            }
+
+            // Row 2: active profile + last mapped command
+            HStack {
+                Text("Game: \(profileManager.activeProfile?.displayName ?? "—")")
+                Spacer()
+                Text("Map: \(profileManager.lastMappedCommand?.displayName ?? "—")")
+            }
+            .foregroundColor(.orange)
+
+            // Row 3: last command dispatched to band
+            HStack {
+                Text("Band: \(band.isConnected ? "✓ connected" : "off")")
+                    .foregroundColor(band.isConnected ? .green : .yellow)
+                Spacer()
+                Text("Sent: \(band.lastSentCommand?.displayName ?? "—")")
+                    .foregroundColor(band.isConnected ? .green : .gray)
+            }
+
+            // BLE Test — bypass motion pipeline and send fixed commands directly to band
+            Divider().background(Color.white.opacity(0.2))
+            Text("BLE TEST  (bypasses profile)")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(.white.opacity(0.4))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                ForEach(GameCommand.allCases, id: \.rawValue) { command in
+                    Button(action: { band.send(command: command) }) {
+                        Text(command.displayName)
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(band.lastSentCommand == command ? .green : .gray)
+                    .disabled(!band.isConnected)
+                }
+            }
+
+            // Row 4: profile switcher (mirrors sessionControlsPanel picker for non-TV testing)
+            let profiles = profileManager.availableProfiles()
+            if profiles.count > 1 {
+                Picker(
+                    "Profile",
+                    selection: Binding(
+                        get: { profileManager.activeGameID ?? .subwaySurfers },
+                        set: { profileManager.setActiveGame($0) }
+                    )
+                ) {
+                    ForEach(profiles, id: \.gameID) { profile in
+                        Text(profile.displayName).tag(profile.gameID)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
         }
         .padding(10)
@@ -188,6 +249,23 @@ struct ContentView: View {
             }
 
             Divider().background(Color.white.opacity(0.3))
+
+            // Profile picker — hidden when only one profile is available
+            let profiles = profileManager.availableProfiles()
+            if profiles.count > 1 {
+                Picker(
+                    "Game Profile",
+                    selection: Binding(
+                        get: { profileManager.activeGameID ?? .subwaySurfers },
+                        set: { profileManager.setActiveGame($0) }
+                    )
+                ) {
+                    ForEach(profiles, id: \.gameID) { profile in
+                        Text(profile.displayName).tag(profile.gameID)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
 
             // Game launch / return button
             if gameLauncher.gameRunning {
@@ -286,10 +364,16 @@ struct ContentView: View {
         // Layer 2 → 3: Wire MotionEngine to MotionInterpreter
         motionEngine.delegate = interpreter
 
-        // Layer 3 → 4: Wire MotionInterpreter to GameSession + Logger + BLE Band
-        interpreter.onMotionEvent = { [weak session, weak band] event in
+        // Layer 3 → 4: Wire MotionInterpreter to GameSession + GameProfileManager + BLE Band
+        // Only set default game on first launch; UserDefaults restores the selection otherwise.
+        if profileManager.getActiveProfileID() == nil {
+            profileManager.setActiveGame(.subwaySurfers)
+        }
+        interpreter.onMotionEvent = { [weak session, weak band, weak profileManager] event in
             session?.handle(event: event)
-            band?.send(event: event)
+            if let command = profileManager?.mapEvent(event) {
+                band?.send(command: command)
+            }
         }
 
         // Wire logger: every snapshot goes to MotionSessionLogger

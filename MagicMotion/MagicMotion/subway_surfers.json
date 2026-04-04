@@ -1,0 +1,10 @@
+{
+  "gameID": "subwaySurfers",
+  "displayName": "Subway Surfers",
+  "mapping": {
+    "leanLeft":  1,
+    "leanRight": 2,
+    "jump":      3,
+    "squat":     4
+  }
+}

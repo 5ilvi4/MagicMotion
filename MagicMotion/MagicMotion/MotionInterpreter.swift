@@ -20,10 +20,13 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
 
     // MARK: - Tuning (can be driven by AppSessionState in future)
 
-    var confidenceGate: Float = 0.5       // snapshots below this are treated as .none
-    var leanThreshold: Float = 0.08       // hip-to-shoulder lateral offset
+    var confidenceGate: Float = 0.5        // snapshots below this are treated as .none
+    var leanThreshold: Float = 0.08        // hip-to-shoulder lateral offset
     var verticalJumpThreshold: Float = 0.08
-    var freezeSDThreshold: Float = 0.02   // std-dev of hipCenter.x across buffer
+    var freezeSDThreshold: Float = 0.02    // std-dev of hipCenter.x across buffer
+    /// Wrists must be this far BELOW hips (normalized) to fire handsDown.
+    /// Natural arm-at-sides sits ~0.05–0.10 below hip; 0.15 requires a deliberate downward reach.
+    var handsDownMargin: Float = 0.15
 
     // MARK: - Private state
 
@@ -74,6 +77,7 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
         let frames = buffer.elements
 
         // --- handsUp ---
+        // Checked first: deliberate bilateral raise, low false-positive risk.
         if let lw = latest.leftWrist, let rw = latest.rightWrist,
            let ls = latest.leftShoulder, let rs = latest.rightShoulder {
             // y=0 is top: wrist y < shoulder y means wrist is ABOVE shoulder
@@ -82,15 +86,9 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
             }
         }
 
-        // --- handsDown ---
-        if let lw = latest.leftWrist, let rw = latest.rightWrist,
-           let lh = latest.leftHip, let rh = latest.rightHip {
-            if lw.y > lh.y && rw.y > rh.y {
-                return .handsDown
-            }
-        }
-
         // --- leanLeft / leanRight ---
+        // Checked before handsDown: neutral arm position (wrists at sides) used to mask
+        // lean detection when handsDown was checked first. Lean is a primary game control.
         if let hip = latest.hipCenter, let shoulder = latest.shoulderCenter {
             if hip.x < shoulder.x - leanThreshold {
                 return .leanLeft
@@ -118,6 +116,16 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
             let hipDrop = nowHip.y - oldHip.y  // positive = moved down
             if hipDrop > verticalJumpThreshold {
                 return .squat
+            }
+        }
+
+        // --- handsDown ---
+        // Checked last among arm/body events. Requires handsDownMargin below hips to avoid
+        // firing in neutral arm-at-sides posture (~0.05–0.10 below hip in practice).
+        if let lw = latest.leftWrist, let rw = latest.rightWrist,
+           let lh = latest.leftHip, let rh = latest.rightHip {
+            if lw.y > lh.y + handsDownMargin && rw.y > rh.y + handsDownMargin {
+                return .handsDown
             }
         }
 

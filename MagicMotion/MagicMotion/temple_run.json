@@ -1,0 +1,10 @@
+{
+  "gameID": "templeRun",
+  "displayName": "Temple Run",
+  "mapping": {
+    "leanLeft":  1,
+    "leanRight": 2,
+    "handsUp":   3,
+    "squat":     4
+  }
+}
