@@ -25,7 +25,7 @@ enum MotionEvent: Equatable {
         case .jump:                 return "Jump"
         case .squat:                return "Squat"
         case .freeze(let d):        return "Freeze (\(String(format: "%.1f", d))s)"
-        case .none:                 return "–"
+        case .none:                 return "neutral"
         }
     }
 }

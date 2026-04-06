@@ -18,7 +18,9 @@ struct ContentView: View {
     @StateObject private var frameSource: CameraManager = CameraManager()
 
     // MARK: - Layer 2: Motion Engine
-    private let motionEngine = MotionEngine()
+    @StateObject private var motionEngine = MotionEngine()
+    @StateObject private var handEngine = HandEngine()
+    @StateObject private var handInterpreter = HandGestureInterpreter()
 
     // MARK: - Layer 3: Motion Interpreter
     @StateObject private var interpreter = MotionInterpreter()
@@ -38,8 +40,10 @@ struct ContentView: View {
 
     // MARK: - Layer 6: Diagnostics
     #if DEBUG
-    @State private var useSyntheticInput = true  // ← DEBUG MODE: Using FakeMotionSource (no camera needed)
+    @State private var useSyntheticInput = false  // set to true to bypass camera and use FakeMotionSource
     @State private var debugMode = true  // ← Auto-enable debug panel
+    @State private var showLandmarkOverlay = true  // toggle skeleton overlay in real-camera mode
+    @State private var showHandOverlay = true       // toggle hand/finger overlay independently
     private let fakeSource = FakeMotionSource()
     #endif
 
@@ -90,51 +94,78 @@ struct ContentView: View {
     }
 
     /// Fallback: iPad-only, game embedded below camera.
-    private var fallbackLayout: some View {
-        VStack(spacing: 12) {
-            #if DEBUG
-            // In DEBUG mode with synthetic input, show full game + debug panel overlay
-            if useSyntheticInput {
+    private var fallbackLayout: AnyView {
+        #if DEBUG
+        if useSyntheticInput {
+            return AnyView(
                 ZStack(alignment: .top) {
                     GameView(session: session)
                         .ignoresSafeArea()
                     if debugMode {
-                        debugPanel
-                            .padding()
+                        debugPanel.padding()
                     }
                 }
-            } else {
-                // With real camera, show camera preview + game
-                CameraPreviewRepresentable(cameraManager: frameSource)
-                    .frame(height: 300)
-                    .cornerRadius(12)
-                    .padding()
+            )
+        } else {
+            return AnyView(
+                ZStack {
+                    CameraPreviewRepresentable(cameraManager: frameSource)
+                        .ignoresSafeArea()
 
-                if debugMode {
-                    debugPanel
-                        .padding()
+                    // MediaPipe pose overlay
+                    if showLandmarkOverlay {
+                        DebugOverlayView(
+                            snapshot: motionEngine.latestSnapshot,
+                            currentEvent: interpreter.currentEvent,
+                            confirmedEvent: interpreter.confirmedEvent,
+                            fps: motionEngine.fps
+                        )
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                    }
+
+                    // MediaPipe hand overlay
+                    if showHandOverlay {
+                        HandOverlayView(hands: handEngine.latestHands)
+                            .ignoresSafeArea()
+                            .allowsHitTesting(false)
+                    }
+
+                    // Gesture debug panel (top-left)
+                    VStack {
+                        HStack {
+                            gestureDebugOverlay.padding()
+                            Spacer()
+                        }
+                        Spacer()
+                        // Toggle buttons (bottom-right)
+                        HStack {
+                            Spacer()
+                            VStack(spacing: 6) {
+                                Button(showHandOverlay ? "Hide Hands" : "Show Hands") {
+                                    showHandOverlay.toggle()
+                                }
+                                Button(showLandmarkOverlay ? "Hide Skeleton" : "Show Skeleton") {
+                                    showLandmarkOverlay.toggle()
+                                }
+                            }
+                            .font(.caption.bold())
+                            .padding(8)
+                            .background(Color.black.opacity(0.6))
+                            .foregroundColor(.white)
+                            .cornerRadius(8)
+                            .padding()
+                        }
+                    }
                 }
-
-                Spacer()
-
-                GameView(session: session)
-                    .frame(height: 200)
-                    .padding()
-            }
-            #else
-            // RELEASE: Always show camera + game
-            CameraPreviewRepresentable(cameraManager: frameSource)
-                .frame(height: 300)
-                .cornerRadius(12)
-                .padding()
-
-            Spacer()
-
-            GameView(session: session)
-                .frame(height: 200)
-                .padding()
-            #endif
+            )
         }
+        #else
+        return AnyView(
+            CameraPreviewRepresentable(cameraManager: frameSource)
+                .ignoresSafeArea()
+        )
+        #endif
     }
 
     // MARK: - Debug panel
@@ -356,6 +387,103 @@ struct ContentView: View {
         default:        return .white
         }
     }
+
+    // MARK: - Gesture debug overlay (real-camera mode)
+
+    private var gestureDebugOverlay: some View {
+        let d = interpreter.debugInfo
+        let fmt = { (v: Float?) -> String in
+            guard let v else { return "—" }
+            return String(format: "%.3f", v)
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            // Header
+            HStack {
+                Circle()
+                    .fill(d.isReliable ? Color.green : Color.red)
+                    .frame(width: 8, height: 8)
+                Text(d.isReliable ? "Tracking OK" : "Tracking LOST")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(d.isReliable ? .green : .red)
+                Spacer()
+                Text(String(format: "conf %.2f", d.confidence))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+
+            Divider().background(Color.white.opacity(0.3))
+
+            // Confirmed event + pending progress
+            HStack {
+                Text("Confirmed:")
+                    .font(.system(size: 11)).foregroundColor(.white.opacity(0.6))
+                Text(interpreter.currentEvent.displayName)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(interpreter.currentEvent == .none ? .gray : .cyan)
+                Spacer()
+                Text("Candidate: \(d.candidate.displayName) [\(d.pendingCount)/3]")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.yellow)
+            }
+
+            // Last mapped command
+            if let cmd = profileManager.lastMappedCommand {
+                Text("→ \(cmd.displayName)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.green)
+            }
+
+            Divider().background(Color.white.opacity(0.3))
+
+            // Raw landmark values
+            Group {
+                landmarkRow("LWrist Y", fmt(d.leftWristY), "LShoulder Y", fmt(d.leftShoulderY))
+                landmarkRow("RWrist Y", fmt(d.rightWristY), "RShoulder Y", fmt(d.rightShoulderY))
+                landmarkRow("LHip Y",  fmt(d.leftHipY),   "RHip Y",      fmt(d.rightHipY))
+                landmarkRow("Lean Δ",  fmt(d.leanDelta),  "Hip rise",    fmt(d.hipRise))
+            }
+
+            Divider().background(Color.white.opacity(0.3))
+
+            // ── Hand gesture section ──────────────────────────────
+            HStack(spacing: 4) {
+                Text("✋ HAND")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.cyan)
+                Spacer()
+            }
+            HStack {
+                let cand = handInterpreter.candidate
+                let cnt  = handInterpreter.pendingCount
+                Text(cand == .none ? "—" : cand.displayName)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(cand == .none ? .gray : .yellow)
+                Text("[\(cnt)/3]")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.5))
+                Spacer()
+                if handInterpreter.currentGesture != .none {
+                    Text("→ SPACE ↑")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.green)
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.black.opacity(0.72))
+        .cornerRadius(10)
+        .frame(maxWidth: 340)
+    }
+
+    private func landmarkRow(_ l1: String, _ v1: String, _ l2: String, _ v2: String) -> some View {
+        HStack(spacing: 4) {
+            Text(l1).font(.system(size: 9)).foregroundColor(.white.opacity(0.55)).frame(width: 64, alignment: .leading)
+            Text(v1).font(.system(size: 10, design: .monospaced)).foregroundColor(.white).frame(width: 52, alignment: .trailing)
+            Spacer()
+            Text(l2).font(.system(size: 9)).foregroundColor(.white.opacity(0.55)).frame(width: 64, alignment: .leading)
+            Text(v2).font(.system(size: 10, design: .monospaced)).foregroundColor(.white).frame(width: 52, alignment: .trailing)
+        }
+    }
     #endif
 
     // MARK: - Setup
@@ -363,6 +491,17 @@ struct ContentView: View {
     private func setupLayers() {
         // Layer 2 → 3: Wire MotionEngine to MotionInterpreter
         motionEngine.delegate = interpreter
+
+        // Layer 2 → 3b: Wire HandEngine to HandGestureInterpreter
+        handInterpreter.connect(to: handEngine)
+        // Precedence: suppress hand gesture while a body event is active (auto-clears 0.8s).
+        handInterpreter.bodyEventActive = { [weak interpreter] in
+            interpreter?.currentEvent != .none
+        }
+        handInterpreter.onHandGesture = { [weak band] gesture in
+            guard gesture == .openPalm else { return }
+            band?.send(command: .spacebar)
+        }
 
         // Layer 3 → 4: Wire MotionInterpreter to GameSession + GameProfileManager + BLE Band
         // Only set default game on first launch; UserDefaults restores the selection otherwise.
@@ -391,15 +530,17 @@ struct ContentView: View {
             fakeSource.replay(script: FakeMotionSource.demoScript)
             print("🔧 DEBUG: Using SyntheticFrameSource + FakeMotionSource")
         } else {
-            frameSource.onNewFrame = { [motionEngine] buffer, orientation in
+            frameSource.onNewFrame = { [motionEngine, handEngine] buffer, orientation in
                 motionEngine.processFrame(buffer, orientation: orientation)
+                handEngine.processFrame(buffer)
             }
             frameSource.start()
             print("📷 Using real camera")
         }
         #else
-        frameSource.onNewFrame = { [motionEngine] buffer, orientation in
+        frameSource.onNewFrame = { [motionEngine, handEngine] buffer, orientation in
             motionEngine.processFrame(buffer, orientation: orientation)
+            handEngine.processFrame(buffer)
         }
         frameSource.start()
         #endif
@@ -440,18 +581,53 @@ struct ContentView: View {
 // MARK: - CameraPreviewRepresentable
 
 struct CameraPreviewRepresentable: UIViewRepresentable {
-    let cameraManager: CameraManager
+    @ObservedObject var cameraManager: CameraManager
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.backgroundColor = .black
-        return view
+    func makeUIView(context: Context) -> PreviewContainerView {
+        print("📷 CameraPreviewRepresentable: makeUIView — previewLayer at this point: \(cameraManager.previewLayer != nil ? "ready" : "nil (will attach in updateUIView)")")
+        return PreviewContainerView()
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        guard let previewLayer = cameraManager.previewLayer else { return }
-        if previewLayer.superlayer == nil { uiView.layer.addSublayer(previewLayer) }
-        DispatchQueue.main.async { previewLayer.frame = uiView.bounds }
+    func updateUIView(_ uiView: PreviewContainerView, context: Context) {
+        let incoming = cameraManager.previewLayer
+        // Only skip if the layer is already the same non-nil object.
+        // Do NOT skip nil→nil: that's the case where the layer hasn't arrived yet
+        // and we must attach it as soon as it becomes available.
+        if let incoming, uiView.previewLayer === incoming { return }
+        print("📷 CameraPreviewRepresentable: updateUIView — incoming=\(incoming != nil ? "non-nil" : "nil")")
+        uiView.previewLayer = incoming
+    }
+}
+
+/// UIView subclass that keeps the preview layer filling its bounds at all times,
+/// including after SwiftUI layout passes and device rotation.
+final class PreviewContainerView: UIView {
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        print("📷 PreviewContainerView: init")
+    }
+    required init?(coder: NSCoder) { super.init(coder: coder) }
+
+    var previewLayer: AVCaptureVideoPreviewLayer? {
+        didSet {
+            oldValue?.removeFromSuperlayer()
+            guard let layer = previewLayer else { return }
+            layer.videoGravity = .resizeAspectFill
+            backgroundColor = .clear
+            self.layer.insertSublayer(layer, at: 0)
+            // Set frame immediately; layoutSubviews will correct it once final bounds arrive.
+            layer.frame = bounds
+            print("📷 PreviewContainerView: layer attached — bounds=\(bounds) layerFrame=\(layer.frame) superlayer=\(layer.superlayer != nil ? "ok" : "nil")")
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard let layer = previewLayer else { return }
+        layer.frame = bounds
+        print("📷 PreviewContainerView: layoutSubviews bounds=\(bounds) layerFrame=\(layer.frame)")
     }
 }
 

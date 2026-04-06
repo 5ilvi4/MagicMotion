@@ -1,12 +1,9 @@
 platform :ios, '16.0'
 
-use_frameworks!
+use_frameworks! :linkage => :static
 
 target 'MagicMotion' do
-  # MediaPipe Tasks Vision — Google's pose detection
-  # 33 landmarks, faster & more accurate than Apple Vision
   pod 'MediaPipeTasksVision'
-  
 end
 
 post_install do |installer|
@@ -20,7 +17,6 @@ post_install do |installer|
       config.build_settings['OTHER_LDFLAGS'] ||= []
       config.build_settings['OTHER_LDFLAGS'] << '-lc++'
 
-      # Ensure force_load for MediaPipeTasksCommon for device and simulator
       config_name = config.name.downcase
       if config_name.include?('debug') || config_name.include?('release')
         config.build_settings['OTHER_LDFLAGS[sdk=iphoneos*]'] = "$(inherited) -force_load \"${PODS_ROOT}/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_device_graph.a\""

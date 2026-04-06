@@ -72,7 +72,7 @@ final class BandBLEManager: NSObject, ObservableObject {
         centralManager = CBCentralManager(
             delegate: self,
             queue: bleQueue,
-            options: [CBCentralManagerOptionRestoreIdentifierKey: "MagicMotionBand"]
+            options: nil
         )
     }
 
@@ -252,19 +252,6 @@ extension BandBLEManager: CBCentralManagerDelegate {
         reconnectAfterDelay()
     }
 
-    nonisolated func centralManager(_ central: CBCentralManager,
-                                    willRestoreState dict: [String: Any]) {
-        guard let restored = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first
-        else { return }
-        log("♻️ Restoring: \(restored.name ?? "peripheral")")
-        self.peripheral = restored
-        restored.delegate = self
-        if restored.state == .connected {
-            restored.discoverServices([BandBLE.serviceUUID])
-        } else {
-            central.connect(restored, options: nil)
-        }
-    }
 }
 
 // MARK: - CBPeripheralDelegate

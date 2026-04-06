@@ -12,6 +12,7 @@
 // Storage is delegated entirely to GameProfileStore.
 // This class owns SwiftUI-facing @Published state and the runtime mapping.
 
+import Combine
 import Foundation
 
 @MainActor

@@ -287,7 +287,7 @@ public enum CPGesture: String, Codable, Equatable {
 }
 
 /// Cross-platform game command generated from gestures
-public struct GameCommand: Codable {
+public struct CPGameCommand: Codable {
     public let gesture: CPGesture
     public let timestamp: TimeInterval
     public let confidence: Float

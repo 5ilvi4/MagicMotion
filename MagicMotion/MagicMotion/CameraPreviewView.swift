@@ -9,18 +9,11 @@ import AVFoundation
 struct CameraPreviewView: UIViewRepresentable {
     let previewLayer: AVCaptureVideoPreviewLayer?
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        if let previewLayer = previewLayer {
-            previewLayer.frame = UIScreen.main.bounds
-            view.layer.addSublayer(previewLayer)
-        }
-        return view
+    func makeUIView(context: Context) -> PreviewContainerView {
+        PreviewContainerView()
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        if let previewLayer = previewLayer {
-            previewLayer.frame = uiView.bounds
-        }
+    func updateUIView(_ uiView: PreviewContainerView, context: Context) {
+        uiView.previewLayer = previewLayer
     }
 }

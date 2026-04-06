@@ -7,22 +7,46 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		E2958E92F29C95CD33E34FC7 /* Pods_MagicMotion.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9567E4AB63C74E47FB4B0184 /* Pods_MagicMotion.framework */; };
+		1A4106D062EB024A71B2D424 /* Pods_MagicMotion.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3664313BD304EA1FC1657146 /* Pods_MagicMotion.framework */; };
 		T1000001T1000001T1000001 /* GameViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T1000002T1000002T1000002 /* GameViewModelTests.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		D80D89942F80187B0051465C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D8A412C42F7354450048488C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D8A412CB2F7354450048488C;
+			remoteInfo = MagicMotion;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
-		254B943BA16700E5FDFCE3E4 /* Pods-MagicMotion.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-MagicMotion.debug.xcconfig"; path = "Target Support Files/Pods-MagicMotion/Pods-MagicMotion.debug.xcconfig"; sourceTree = "<group>"; };
-		9567E4AB63C74E47FB4B0184 /* Pods_MagicMotion.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_MagicMotion.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		3664313BD304EA1FC1657146 /* Pods_MagicMotion.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_MagicMotion.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		49628D3DE764A09C2C9F8F95 /* Pods-MagicMotion.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-MagicMotion.debug.xcconfig"; path = "Target Support Files/Pods-MagicMotion/Pods-MagicMotion.debug.xcconfig"; sourceTree = "<group>"; };
+		9DD0EBCC0A3447636A4C1D85 /* Pods-MagicMotion.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-MagicMotion.release.xcconfig"; path = "Target Support Files/Pods-MagicMotion/Pods-MagicMotion.release.xcconfig"; sourceTree = "<group>"; };
 		D8A412CC2F7354450048488C /* MagicMotion.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MagicMotion.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		E1A6A2255B237F87A240324C /* Pods-MagicMotion.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-MagicMotion.release.xcconfig"; path = "Target Support Files/Pods-MagicMotion/Pods-MagicMotion.release.xcconfig"; sourceTree = "<group>"; };
 		T1000002T1000002T1000002 /* GameViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameViewModelTests.swift; sourceTree = "<group>"; };
 		T1000003T1000003T1000003 /* MagicMotionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MagicMotionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D85ACD872F8128B50078D00A /* Exceptions for "MagicMotion" folder in "MagicMotionTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				hand_landmarker.task,
+				pose_landmarker_full.task,
+			);
+			target = T1000005T1000005T1000005 /* MagicMotionTests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D8A412CE2F7354450048488C /* MagicMotion */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D85ACD872F8128B50078D00A /* Exceptions for "MagicMotion" folder in "MagicMotionTests" target */,
+			);
 			path = MagicMotion;
 			sourceTree = "<group>";
 		};
@@ -33,45 +57,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E2958E92F29C95CD33E34FC7 /* Pods_MagicMotion.framework in Frameworks */,
+				1A4106D062EB024A71B2D424 /* Pods_MagicMotion.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-/* End PBXFrameworksBuildPhase section */
-
-/* Begin PBXNativeTarget section */
-		T1000005T1000005T1000005 /* MagicMotionTests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = T100000AT100000AT100000A /* Build configuration list for PBXNativeTarget "MagicMotionTests" */;
-			buildPhases = (
-				T1000006T1000006T1000006 /* Sources */,
-				T1000007T1000007T1000007 /* Frameworks */,
-				T1000008T1000008T1000008 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				T1000009T1000009T1000009 /* PBXTargetDependency */,
-			);
-			name = MagicMotionTests;
-			productName = MagicMotionTests;
-			productReference = T1000003T1000003T1000003 /* MagicMotionTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
-		};
-/* End PBXNativeTarget section (tests) */
-
-/* Begin PBXSourcesBuildPhase section (tests) */
-		T1000006T1000006T1000006 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				T1000001T1000001T1000001 /* GameViewModelTests.swift in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXSourcesBuildPhase section (tests) */
-
-/* Begin PBXFrameworksBuildPhase section (tests) */
 		T1000007T1000007T1000007 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -79,40 +68,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-/* End PBXFrameworksBuildPhase section (tests) */
-
-/* Begin PBXResourcesBuildPhase section (tests) */
-		T1000008T1000008T1000008 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section (tests) */
-
-/* Begin PBXTargetDependency section */
-		T1000009T1000009T1000009 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = D8A412CB2F7354450048488C /* MagicMotion */;
-		};
-/* End PBXTargetDependency section */
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		0A267C437B938E2FF0810F6A /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				254B943BA16700E5FDFCE3E4 /* Pods-MagicMotion.debug.xcconfig */,
-				E1A6A2255B237F87A240324C /* Pods-MagicMotion.release.xcconfig */,
+				49628D3DE764A09C2C9F8F95 /* Pods-MagicMotion.debug.xcconfig */,
+				9DD0EBCC0A3447636A4C1D85 /* Pods-MagicMotion.release.xcconfig */,
 			);
-			name = Pods;
 			path = Pods;
 			sourceTree = "<group>";
 		};
-		B1BCB640AFF22DA3B1A585E0 /* Frameworks */ = {
+		B716BCF3F01A3A467BBAF949 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				9567E4AB63C74E47FB4B0184 /* Pods_MagicMotion.framework */,
+				3664313BD304EA1FC1657146 /* Pods_MagicMotion.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -124,7 +95,7 @@
 				T1000004T1000004T1000004 /* MagicMotionTests */,
 				D8A412CD2F7354450048488C /* Products */,
 				0A267C437B938E2FF0810F6A /* Pods */,
-				B1BCB640AFF22DA3B1A585E0 /* Frameworks */,
+				B716BCF3F01A3A467BBAF949 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -152,7 +123,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = D8A412D72F7354470048488C /* Build configuration list for PBXNativeTarget "MagicMotion" */;
 			buildPhases = (
-				0172C0CBAFBEB660AED5699A /* [CP] Check Pods Manifest.lock */,
+				C500D024EE831D1ACAF04A5C /* [CP] Check Pods Manifest.lock */,
 				D8A412C82F7354450048488C /* Sources */,
 				D8A412C92F7354450048488C /* Frameworks */,
 				D8A412CA2F7354450048488C /* Resources */,
@@ -168,6 +139,24 @@
 			productName = MagicMotion;
 			productReference = D8A412CC2F7354450048488C /* MagicMotion.app */;
 			productType = "com.apple.product-type.application";
+		};
+		T1000005T1000005T1000005 /* MagicMotionTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = T100000AT100000AT100000A /* Build configuration list for PBXNativeTarget "MagicMotionTests" */;
+			buildPhases = (
+				T1000006T1000006T1000006 /* Sources */,
+				T1000007T1000007T1000007 /* Frameworks */,
+				T1000008T1000008T1000008 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				T1000009T1000009T1000009 /* PBXTargetDependency */,
+			);
+			name = MagicMotionTests;
+			productName = MagicMotionTests;
+			productReference = T1000003T1000003T1000003 /* MagicMotionTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -216,10 +205,17 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		T1000008T1000008T1000008 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		0172C0CBAFBEB660AED5699A /* [CP] Check Pods Manifest.lock */ = {
+		C500D024EE831D1ACAF04A5C /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -251,7 +247,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		T1000006T1000006T1000006 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				T1000001T1000001T1000001 /* GameViewModelTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		T1000009T1000009T1000009 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D8A412CB2F7354450048488C /* MagicMotion */;
+			targetProxy = D80D89942F80187B0051465C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		D8A412D52F7354470048488C /* Debug */ = {
@@ -306,7 +318,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -363,7 +375,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -375,7 +387,7 @@
 		};
 		D8A412D82F7354470048488C /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 254B943BA16700E5FDFCE3E4 /* Pods-MagicMotion.debug.xcconfig */;
+			baseConfigurationReference = 49628D3DE764A09C2C9F8F95 /* Pods-MagicMotion.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -383,15 +395,15 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 84UBK5T2B5;
 				ENABLE_BITCODE = NO;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "$(inherited)";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to detect your body movements for gesture control";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "MagicMotion uses Bluetooth to send gesture commands to the MotionMind wrist band, including while the app is in the background.";
 				INFOPLIST_KEY_NSBluetoothCentralUsageDescription = "MotionMind uses Bluetooth to communicate with your motion band for gesture control during gameplay.";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "MotionMind broadcasts motion data via Bluetooth for research and clinical assessment.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to detect your body movements for gesture control";
 				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central bluetooth-peripheral";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -401,7 +413,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = "com.silviadinda.MagicMotion";
+				PRODUCT_BUNDLE_IDENTIFIER = com.silviadinda.MagicMotion;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -415,7 +427,7 @@
 		};
 		D8A412D92F7354470048488C /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = E1A6A2255B237F87A240324C /* Pods-MagicMotion.release.xcconfig */;
+			baseConfigurationReference = 9DD0EBCC0A3447636A4C1D85 /* Pods-MagicMotion.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -423,15 +435,15 @@
 				CLANG_CXX_LIBRARY = "libc++";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 84UBK5T2B5;
 				ENABLE_BITCODE = NO;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "$(inherited)";
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to detect your body movements for gesture control";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "MagicMotion uses Bluetooth to send gesture commands to the MotionMind wrist band, including while the app is in the background.";
 				INFOPLIST_KEY_NSBluetoothCentralUsageDescription = "MotionMind uses Bluetooth to communicate with your motion band for gesture control during gameplay.";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "MotionMind broadcasts motion data via Bluetooth for research and clinical assessment.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "We need camera access to detect your body movements for gesture control";
 				INFOPLIST_KEY_UIBackgroundModes = "bluetooth-central bluetooth-peripheral";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -441,7 +453,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = "$(inherited)";
-				PRODUCT_BUNDLE_IDENTIFIER = "com.silviadinda.MagicMotion";
+				PRODUCT_BUNDLE_IDENTIFIER = com.silviadinda.MagicMotion;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -453,7 +465,7 @@
 			};
 			name = Release;
 		};
-		T100000BT100000BT100000B /* Debug (Tests) */ = {
+		T100000BT100000BT100000B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -462,7 +474,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.silviadinda.MagicMotionTests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.silviadinda.MagicMotionTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -472,7 +484,7 @@
 			};
 			name = Debug;
 		};
-		T100000CT100000CT100000C /* Release (Tests) */ = {
+		T100000CT100000CT100000C /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
@@ -481,7 +493,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.silviadinda.MagicMotionTests";
+				PRODUCT_BUNDLE_IDENTIFIER = com.silviadinda.MagicMotionTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;

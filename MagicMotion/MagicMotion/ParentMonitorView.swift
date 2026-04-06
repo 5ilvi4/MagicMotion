@@ -28,6 +28,7 @@ struct ParentMonitorView: View {
             DebugOverlayView(
                 snapshot: nil,
                 currentEvent: interpreter.currentEvent,
+                confirmedEvent: interpreter.confirmedEvent,
                 fps: 0
             )
             .ignoresSafeArea()

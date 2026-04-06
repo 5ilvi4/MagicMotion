@@ -164,4 +164,8 @@ class FakeMotionSource {
 // MARK: - MotionEngineStub
 // A dummy MotionEngine stand-in used so FakeMotionSource can call delegate methods
 // without importing or constructing a real MotionEngine.
-private class MotionEngineStub: MotionEngine {}
+private class MotionEngineStub: MotionEngine {
+    // Override to suppress MediaPipe initialization — this stub only satisfies
+    // the `motionEngine:` parameter in MotionEngineDelegate callbacks.
+    override func setupMediaPipe() {}
+}

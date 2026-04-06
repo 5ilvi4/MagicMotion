@@ -8,11 +8,51 @@
 import Foundation
 import Combine
 
+// MARK: - GestureDebugInfo
+
+/// Raw classifier inputs captured each frame for on-screen debugging.
+struct GestureDebugInfo {
+    var confidence: Float
+    var isReliable: Bool
+    var candidate: MotionEvent      // what classify() decided this frame (pre-confirmation)
+    var pendingCount: Int           // frames accumulated toward confirmation
+    // Raw landmark values (nil = landmark not visible)
+    var leftWristY: Float?
+    var rightWristY: Float?
+    var leftShoulderY: Float?
+    var rightShoulderY: Float?
+    var leftHipY: Float?
+    var rightHipY: Float?
+    var hipCenterX: Float?
+    var shoulderCenterX: Float?
+    var leanDelta: Float?           // hipCenter.x - shoulderCenter.x
+    var hipRise: Float?             // relative to oldest frame in buffer
+    var hipDrop: Float?
+    var timestamp: Date
+
+    static var empty: GestureDebugInfo {
+        GestureDebugInfo(confidence: 0, isReliable: false, candidate: .none,
+                         pendingCount: 0, leftWristY: nil, rightWristY: nil,
+                         leftShoulderY: nil, rightShoulderY: nil,
+                         leftHipY: nil, rightHipY: nil,
+                         hipCenterX: nil, shoulderCenterX: nil,
+                         leanDelta: nil, hipRise: nil, hipDrop: nil,
+                         timestamp: .distantPast)
+    }
+}
+
 class MotionInterpreter: ObservableObject, MotionEngineDelegate {
 
     // MARK: - Published
 
+    /// Display event — auto-clears after 0.8s. Use for momentary UI flash.
     @Published var currentEvent: MotionEvent = .none
+
+    /// Last confirmed gesture — never auto-clears. Use for stable state display and transition logging.
+    @Published private(set) var confirmedEvent: MotionEvent = .none
+
+    /// Raw landmark values used by the last classify() call. Updated every frame.
+    @Published var debugInfo: GestureDebugInfo = .empty
 
     // MARK: - Output
 
@@ -40,6 +80,10 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
     // Cooldown between fired events
     private var lastEventTime: Date = .distantPast
     private let cooldown: TimeInterval = 0.5
+
+    // Last confirmed event — separate from currentEvent which auto-clears for display.
+    // Transition logging uses this so "– → gesture" doesn't repeat after every 0.8s reset.
+    private var lastConfirmedEvent: MotionEvent = .none
 
     // Freeze tracking
     private var freezeStartTime: Date? = nil
@@ -69,6 +113,34 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
         }
 
         pushConfirmation(classified)
+
+        // Publish raw debug info every frame (on main actor via DispatchQueue.main).
+        let frames = buffer.elements
+        let oldHip = frames.first?.hipCenter
+        let nowHip = snapshot.hipCenter
+        let leanDelta: Float? = {
+            guard let h = snapshot.hipCenter, let s = snapshot.shoulderCenter else { return nil }
+            return h.x - s.x
+        }()
+        let info = GestureDebugInfo(
+            confidence: snapshot.trackingConfidence,
+            isReliable: snapshot.isReliable,
+            candidate: classified,
+            pendingCount: pendingCount,
+            leftWristY: snapshot.leftWrist?.y,
+            rightWristY: snapshot.rightWrist?.y,
+            leftShoulderY: snapshot.leftShoulder?.y,
+            rightShoulderY: snapshot.rightShoulder?.y,
+            leftHipY: snapshot.leftHip?.y,
+            rightHipY: snapshot.rightHip?.y,
+            hipCenterX: snapshot.hipCenter?.x,
+            shoulderCenterX: snapshot.shoulderCenter?.x,
+            leanDelta: leanDelta,
+            hipRise: (oldHip != nil && nowHip != nil) ? oldHip!.y - nowHip!.y : nil,
+            hipDrop: (oldHip != nil && nowHip != nil) ? nowHip!.y - oldHip!.y : nil,
+            timestamp: snapshot.timestamp
+        )
+        DispatchQueue.main.async { [weak self] in self?.debugInfo = info }
     }
 
     // MARK: - Classifiers
@@ -163,8 +235,17 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
 
         guard pendingCount >= confirmationFrames else { return }
         guard event != .none else {
-            // Publish .none immediately (clears display)
-            DispatchQueue.main.async { self.currentEvent = .none }
+            // Publish .none immediately (clears display).
+            // Also reset lastConfirmedEvent so the next real gesture logs a clean transition.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.lastConfirmedEvent != .none {
+                    print("🕹️ Gesture: \(self.lastConfirmedEvent.displayName) → neutral")
+                    self.lastConfirmedEvent = .none
+                    self.confirmedEvent = .none
+                }
+                self.currentEvent = .none
+            }
             return
         }
 
@@ -176,11 +257,19 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            // Log transition against lastConfirmedEvent, NOT currentEvent.
+            // currentEvent auto-clears after 0.8s (display-only), so reading it would
+            // produce repeated "– → gesture" entries after each reset.
+            if self.lastConfirmedEvent != event {
+                print("🕹️ Gesture: \(self.lastConfirmedEvent.displayName) → \(event.displayName)")
+                self.lastConfirmedEvent = event
+                self.confirmedEvent = event
+            }
             self.currentEvent = event
             self.onMotionEvent?(event)
         }
 
-        // Auto-clear display after 0.8s
+        // Auto-clear display after 0.8s (does not affect lastConfirmedEvent)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.currentEvent = .none
         }

@@ -4,6 +4,7 @@
 // Wraps MediaPipe PoseLandmarker and exposes only app-level PoseSnapshot types.
 // RULE: This is the ONLY file in the project that imports MediaPipeTasksVision.
 
+import Combine
 import Foundation
 import AVFoundation
 import UIKit
@@ -22,12 +23,20 @@ protocol MotionEngineDelegate: AnyObject {
 // MARK: - MotionEngine
 
 /// Processes raw CMSampleBuffers through MediaPipe and emits PoseSnapshots.
-class MotionEngine: NSObject {
+class MotionEngine: NSObject, ObservableObject {
 
     weak var delegate: MotionEngineDelegate?
 
     /// Optional secondary callback for every emitted PoseSnapshot (e.g. session logger).
     var onPoseSnapshot: ((PoseSnapshot) -> Void)?
+
+    /// Latest snapshot — published for overlay views that need direct access.
+    @Published private(set) var latestSnapshot: PoseSnapshot?
+
+    /// Rolling FPS measured over 1-second windows.
+    @Published private(set) var fps: Double = 0
+    private var fpsFrameCount = 0
+    private var fpsWindowStart = Date()
 
     // MARK: - Private
 
@@ -45,7 +54,7 @@ class MotionEngine: NSObject {
         setupMediaPipe()
     }
 
-    private func setupMediaPipe() {
+    func setupMediaPipe() {
         #if canImport(MediaPipeTasksVision)
         guard let modelPath = Bundle.main.path(forResource: "pose_landmarker_full", ofType: "task") else {
             print("⚠️ MotionEngine: pose_landmarker_full.task not found in bundle")
@@ -122,15 +131,19 @@ extension MotionEngine: PoseLandmarkerLiveStreamDelegate {
             guard idx < landmarks.count else { return nil }
             let l = landmarks[idx]
             let vis = l.visibility ?? 0
-            guard vis > 0.3 else { return nil }
-            return PoseSnapshot.Landmark(x: l.x, y: l.y, z: l.z, visibility: vis)
+            guard let vis = l.visibility?.floatValue, vis > 0.3 else { return nil }
+            return PoseSnapshot.Landmark(
+                x: l.x,
+                y: l.y,
+                z: l.z,
+                visibility: vis
+            )
         }
-
         // Compute overall confidence as average visibility of key landmarks
         let keyIndices = [11, 12, 23, 24, 25, 26, 27, 28]
         let avgVis = keyIndices.compactMap { i -> Float? in
             guard i < landmarks.count else { return nil }
-            return landmarks[i].visibility
+            return landmarks[i].visibility?.floatValue
         }.reduce(0, +) / Float(keyIndices.count)
 
         let snapshot = PoseSnapshot(
@@ -161,8 +174,17 @@ extension MotionEngine: PoseLandmarkerLiveStreamDelegate {
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            self.latestSnapshot = snapshot
             self.delegate?.motionEngine(self, didOutput: snapshot)
             self.onPoseSnapshot?(snapshot)
+            // Rolling FPS
+            self.fpsFrameCount += 1
+            let elapsed = Date().timeIntervalSince(self.fpsWindowStart)
+            if elapsed >= 1.0 {
+                self.fps = Double(self.fpsFrameCount) / elapsed
+                self.fpsFrameCount = 0
+                self.fpsWindowStart = Date()
+            }
         }
     }
 

@@ -25,7 +25,16 @@ class CameraManager: NSObject, ObservableObject, FrameSource {
     @Published var isCameraActive = false
 
     /// Total frames delivered since last start (diagnostics).
-    @Published var frameCount: Int = 0
+    /// NOT @Published — updating this at 30fps forces ContentView to re-render at 30fps,
+    /// which causes updateUIView to run 30x/sec and thrash the AVCaptureVideoPreviewLayer.
+    private(set) var frameCount: Int = 0
+
+    /// Diagnostic: one UIImage per second so we can verify the camera produces real content.
+    /// Nil until the first frame arrives. Show this in SwiftUI to confirm feed isn't black.
+    @Published var diagnosticFrame: UIImage?
+    private var lastDiagnosticTime: TimeInterval = 0
+    // Reuse CIContext — creating one per frame is expensive.
+    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
     /// Begin requesting permission and running the capture session.
     func start() {
@@ -62,7 +71,8 @@ class CameraManager: NSObject, ObservableObject, FrameSource {
     // MARK: - Preview layer (CameraManager-specific, not in protocol)
 
     /// The layer that displays the camera preview (used in UIViewRepresentable).
-    var previewLayer: AVCaptureVideoPreviewLayer?
+    /// @Published so SwiftUI re-renders when the session is ready asynchronously.
+    @Published var previewLayer: AVCaptureVideoPreviewLayer?
 
     // MARK: - Private
 
@@ -71,34 +81,65 @@ class CameraManager: NSObject, ObservableObject, FrameSource {
     private func setupSession() {
         captureSession.beginConfiguration()
 
-        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
-              let input = try? AVCaptureDeviceInput(device: camera) else {
-            print("Failed to access front camera")
+        // --- Device selection ---
+        let position: AVCaptureDevice.Position = .front
+        guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) else {
+            print("❌ CameraManager: camera not available for position \(position.rawValue)")
             captureSession.commitConfiguration()
             return
         }
+        print("📷 CameraManager: using '\(camera.localizedName)' position=\(position == .front ? "front" : "back")")
 
-        if captureSession.canAddInput(input) { captureSession.addInput(input) }
+        guard let input = try? AVCaptureDeviceInput(device: camera) else {
+            print("❌ CameraManager: AVCaptureDeviceInput creation failed")
+            captureSession.commitConfiguration()
+            return
+        }
+        if captureSession.canAddInput(input) {
+            captureSession.addInput(input)
+        } else {
+            print("❌ CameraManager: cannot add camera input")
+        }
 
+        // --- Preset (set before output to avoid format conflicts) ---
+        if captureSession.canSetSessionPreset(.hd1280x720) {
+            captureSession.sessionPreset = .hd1280x720
+        } else if captureSession.canSetSessionPreset(.medium) {
+            captureSession.sessionPreset = .medium
+        }
+        print("📷 CameraManager: sessionPreset=\(captureSession.sessionPreset.rawValue)")
+
+        // --- Video output ---
         let videoOutput = AVCaptureVideoDataOutput()
-        videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "camera.frame.queue"))
         videoOutput.alwaysDiscardsLateVideoFrames = true
-        if captureSession.canAddOutput(videoOutput) { captureSession.addOutput(videoOutput) }
-
-        if captureSession.canSetSessionPreset(.high) { captureSession.sessionPreset = .high }
+        videoOutput.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ]
+        let frameQueue = DispatchQueue(label: "com.magicmotion.camera.frames", qos: .userInitiated)
+        videoOutput.setSampleBufferDelegate(self, queue: frameQueue)
+        if captureSession.canAddOutput(videoOutput) {
+            captureSession.addOutput(videoOutput)
+        } else {
+            print("❌ CameraManager: cannot add video output")
+        }
 
         captureSession.commitConfiguration()
 
+        // --- Preview layer (after commitConfiguration, before startRunning) ---
         let preview = AVCaptureVideoPreviewLayer(session: captureSession)
         preview.videoGravity = .resizeAspectFill
-        previewLayer = preview
+        print("📷 CameraManager: previewLayer.session isNil=\(preview.session == nil)")
+        DispatchQueue.main.async { self.previewLayer = preview }
 
+        // --- Start session ---
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.captureSession.startRunning()
+            guard let self else { return }
+            self.captureSession.startRunning()
+            print("📷 CameraManager: captureSession.isRunning=\(self.captureSession.isRunning)")
             DispatchQueue.main.async {
-                self?.isRunning = true
-                self?.isCameraActive = true
-                self?.frameCount = 0
+                self.isRunning = true
+                self.isCameraActive = true
+                self.frameCount = 0
             }
         }
     }
@@ -118,7 +159,32 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
         case .landscapeRight:      orientation = .left
         default:                   orientation = .up
         }
-        DispatchQueue.main.async { self.frameCount += 1 }
+        let isFirst = frameCount == 0
+        frameCount += 1
+        if isFirst { print("📷 CameraManager: first frame received") }
+
+        // Diagnostic: capture one UIImage/sec to verify real camera content.
+        // UIImage(ciImage:) is lazy and may render black — must use CIContext to materialize.
+        let now = Date().timeIntervalSinceReferenceDate
+        if now - lastDiagnosticTime > 1.0,
+           let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            lastDiagnosticTime = now
+            let w = CVPixelBufferGetWidth(pixelBuffer)
+            let h = CVPixelBufferGetHeight(pixelBuffer)
+            let fmt = CVPixelBufferGetPixelFormatType(pixelBuffer)
+            print("📷 frame: \(w)×\(h) fmt=\(fmt) (BGRA=\(kCVPixelFormatType_32BGRA))")
+
+            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+            // createCGImage renders pixels immediately — avoids lazy black UIImage
+            if let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) {
+                let uiImage = UIImage(cgImage: cgImage)
+                print("📷 diagnosticFrame created: \(uiImage.size)")
+                DispatchQueue.main.async { self.diagnosticFrame = uiImage }
+            } else {
+                print("❌ CIContext.createCGImage failed")
+            }
+        }
+
         onNewFrame?(sampleBuffer, orientation)
     }
 }
