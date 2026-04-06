@@ -4,6 +4,7 @@
 // App-level pose type. NO MediaPipe imports.
 // All layers above MotionEngine use this type only.
 
+import Combine
 import Foundation
 
 /// A single frame of pose data expressed entirely in app-level types.

@@ -3,6 +3,9 @@
 //
 // Generic fixed-capacity ring buffer. Thread-unsafe — call from one queue.
 
+import Combine
+import Foundation
+
 struct RingBuffer<T> {
     private var storage: [T?]
     private var head: Int = 0

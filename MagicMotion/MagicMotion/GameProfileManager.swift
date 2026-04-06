@@ -87,28 +87,35 @@ final class GameProfileManager: ObservableObject {
 
     // MARK: - Runtime Mapping
 
-    /// Map a MotionEvent to a GameCommand for the active profile.
-    /// Returns nil if no active profile is set or the event is not mapped.
-    func mapEvent(_ event: MotionEvent) -> GameCommand? {
+    /// Map a normalized AppIntent to a GameCommand for the active profile.
+    /// Returns nil if no active profile is set or the intent is not mapped.
+    func mapIntent(_ intent: AppIntent) -> GameCommand? {
         guard let profile = activeProfile else {
-            log("⚠️ mapEvent called but no active profile is set")
+            log("⚠️ mapIntent called but no active profile is set")
             return nil
         }
-        let command = profile.command(for: event)
+        let command = profile.command(for: intent)
         if let command {
             lastMappedCommand = command
             lastUnmappedEvent = nil
-        } else if event != .none {
+        } else if intent != .none {
             lastMappedCommand = nil
-            lastUnmappedEvent = event
-            log("ℹ️ '\(event.displayName)' has no mapping in '\(profile.displayName)'")
+            // Keep lastUnmappedEvent as MotionEvent for existing HUD — only set for body intents.
+            log("ℹ️ '\(intent.displayName)' has no mapping in '\(profile.displayName)'")
         }
         return command
     }
 
-    /// Returns the MotionEvents the active profile can dispatch.
-    func getSupportedEvents() -> [MotionEvent] {
-        activeProfile?.supportedEvents ?? []
+    /// Convenience bridge: converts MotionEvent → AppIntent → GameCommand.
+    /// Used by existing callers during migration.
+    func mapEvent(_ event: MotionEvent) -> GameCommand? {
+        mapIntent(AppIntent.from(event))
+    }
+
+    /// Returns all AppIntents mapped in the active profile.
+    func getSupportedIntents() -> [AppIntent] {
+        guard let profile = activeProfile else { return [] }
+        return profile.mapping.keys.compactMap { MotionEventKey(rawValue: $0).flatMap { AppIntent.from($0) } }
     }
 
     // MARK: - Logging

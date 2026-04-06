@@ -47,38 +47,33 @@ enum GameCommand: UInt8, Codable, CaseIterable {
 }
 
 // MARK: - Motion Event Key
-// String keys used in profile JSON, one per named MotionEvent case.
-// Associated-value cases (.freeze, .none) intentionally excluded — they are
-// not dispatchable game commands.
+// String keys used in profile JSON, covering both body (MotionEvent) and
+// hand (HandGesture) intents. Codable so profiles can be stored as JSON.
+// Associated-value cases (.freeze, .none) intentionally excluded.
 
 enum MotionEventKey: String, Codable, CaseIterable {
-    case handsUp    = "handsUp"
-    case handsDown  = "handsDown"
-    case leanLeft   = "leanLeft"
-    case leanRight  = "leanRight"
-    case jump       = "jump"
-    case squat      = "squat"
+    // Body-sourced
+    case handsUp         = "handsUp"
+    case handsDown       = "handsDown"
+    case leanLeft        = "leanLeft"
+    case leanRight       = "leanRight"
+    case jump            = "jump"
+    case squat           = "squat"
+    // Hand-sourced
+    case handSwipeLeft   = "handSwipeLeft"
+    case handSwipeRight  = "handSwipeRight"
 
-    init?(motionEvent: MotionEvent) {
-        switch motionEvent {
-        case .handsUp:           self = .handsUp
-        case .handsDown:         self = .handsDown
-        case .leanLeft:          self = .leanLeft
-        case .leanRight:         self = .leanRight
-        case .jump:              self = .jump
-        case .squat:             self = .squat
-        case .freeze, .none:     return nil
-        }
-    }
-
-    var asMotionEvent: MotionEvent {
-        switch self {
-        case .handsUp:    return .handsUp
-        case .handsDown:  return .handsDown
-        case .leanLeft:   return .leanLeft
-        case .leanRight:  return .leanRight
-        case .jump:       return .jump
-        case .squat:      return .squat
+    init?(intent: AppIntent) {
+        switch intent {
+        case .handsUp:        self = .handsUp
+        case .handsDown:      self = .handsDown
+        case .leanLeft:       self = .leanLeft
+        case .leanRight:      self = .leanRight
+        case .jump:           self = .jump
+        case .squat:          self = .squat
+        case .handSwipeLeft:  self = .handSwipeLeft
+        case .handSwipeRight: self = .handSwipeRight
+        case .none:           return nil
         }
     }
 }
@@ -91,14 +86,61 @@ struct GameProfile: Codable {
     /// Keys are MotionEventKey.rawValue strings; values are GameCommand raw bytes.
     let mapping: [String: GameCommand]
 
-    /// Returns the GameCommand for a MotionEvent, or nil if unmapped.
-    func command(for event: MotionEvent) -> GameCommand? {
-        guard let key = MotionEventKey(motionEvent: event) else { return nil }
+    /// Recognizers active for this game. nil = all recognizers enabled (legacy behaviour).
+    /// Specify to restrict which gesture classes are checked — useful when a game
+    /// should not respond to certain gesture types (e.g. a hand-free game ignoring hand swipes).
+    var enabledRecognizers: [RecognizerID]?
+
+    /// Per-recognizer tuning overrides. nil = use each recognizer's built-in defaults.
+    /// Keys are RecognizerID.rawValue strings; values are threshold/config dictionaries.
+    /// Example JSON:
+    ///   "recognizerConfig": { "bodyLean": { "threshold": 0.06 } }
+    var recognizerConfig: [String: [String: Double]]?
+
+    // MARK: - Codable (backward-compatible with JSON lacking the new fields)
+
+    enum CodingKeys: String, CodingKey {
+        case gameID, displayName, mapping, enabledRecognizers, recognizerConfig
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        gameID             = try c.decode(GameID.self,              forKey: .gameID)
+        displayName        = try c.decode(String.self,              forKey: .displayName)
+        mapping            = try c.decode([String: GameCommand].self, forKey: .mapping)
+        enabledRecognizers = try c.decodeIfPresent([RecognizerID].self,           forKey: .enabledRecognizers)
+        recognizerConfig   = try c.decodeIfPresent([String: [String: Double]].self, forKey: .recognizerConfig)
+    }
+
+    // Plain memberwise init for hardcoded fallbacks in GameProfileStore.
+    init(gameID: GameID, displayName: String, mapping: [String: GameCommand],
+         enabledRecognizers: [RecognizerID]? = nil,
+         recognizerConfig: [String: [String: Double]]? = nil) {
+        self.gameID             = gameID
+        self.displayName        = displayName
+        self.mapping            = mapping
+        self.enabledRecognizers = enabledRecognizers
+        self.recognizerConfig   = recognizerConfig
+    }
+
+    // MARK: - Helpers
+
+    /// Returns the GameCommand for a normalized AppIntent, or nil if unmapped.
+    func command(for intent: AppIntent) -> GameCommand? {
+        guard let key = MotionEventKey(intent: intent) else { return nil }
         return mapping[key.rawValue]
     }
 
-    /// The MotionEvents that have a mapping in this profile.
-    var supportedEvents: [MotionEvent] {
-        mapping.keys.compactMap { MotionEventKey(rawValue: $0)?.asMotionEvent }
+    /// True when the given recognizer should run for this profile.
+    /// Returns true for all recognizers when enabledRecognizers is nil (legacy default).
+    func isEnabled(_ recognizerID: RecognizerID) -> Bool {
+        guard let list = enabledRecognizers else { return true }
+        return list.contains(recognizerID)
+    }
+
+    /// Returns a RecognizerConfig for the given recognizer, or .empty if none defined.
+    func config(for recognizerID: RecognizerID) -> RecognizerConfig {
+        guard let dict = recognizerConfig?[recognizerID.rawValue] else { return .empty }
+        return RecognizerConfig(values: dict)
     }
 }

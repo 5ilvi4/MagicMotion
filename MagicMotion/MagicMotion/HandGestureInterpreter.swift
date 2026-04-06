@@ -1,18 +1,20 @@
 // HandGestureInterpreter.swift
 // MagicMotion
 //
-// Detects hand gestures from HandEngine's MediaPipe hand landmarks.
-// Runs entirely on MainActor (SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor).
+// Layer 3b — Hand Gesture Interpreter.
+// Thin confirmation/cooldown gate sitting above the HandRecognizer library.
 //
-// Gesture: Open Palm
-//   All 4 non-thumb fingertips must be clearly ABOVE their PIP joints.
-//   In portrait normalized landmark space: fingertip.x < pip.x
-//   (lm.x maps to portrait vertical; smaller = higher on screen.)
+//   HandEngine.latestHands
+//     → HandSwipeRecognizer.process(hand:)  → AppIntent?
+//     → confirmation gate (2 frames)
+//     → cooldown (0.8 s)
+//     → onHandGesture(HandGesture) → InputCoordinator
 //
-// Confirmation: 3 consecutive frames (same as MotionInterpreter).
-// Cooldown:     1.0 s — slightly longer than body gesture (0.5 s) to
-//               reduce double-fire when hand and body gestures overlap.
-// Precedence:   suppressed while body interpreter has an active event.
+// Recognition logic (feature extraction, static shape, point history, dynamic
+// swipe classification) now lives in HandSwipeRecognizer.
+// To swap to a different recognizer: replace `swipeRecognizer` and keep this gate.
+//
+// Conflict suppression is handled upstream in InputCoordinator, not here.
 
 import Combine
 import Foundation
@@ -20,13 +22,15 @@ import Foundation
 // MARK: - HandGesture
 
 enum HandGesture: Equatable {
-    case openPalm
+    case swipeLeft
+    case swipeRight
     case none
 
     var displayName: String {
         switch self {
-        case .openPalm: return "Open Palm"
-        case .none:     return "none"
+        case .swipeLeft:  return "Swipe Left"
+        case .swipeRight: return "Swipe Right"
+        case .none:       return "none"
         }
     }
 }
@@ -37,34 +41,41 @@ final class HandGestureInterpreter: ObservableObject {
 
     // MARK: - Published
 
-    /// Confirmed, active gesture (auto-clears after 0.8 s for display flash).
+    /// Confirmed, active gesture. Auto-clears after 0.8 s for display flash.
     @Published private(set) var currentGesture: HandGesture = .none
 
-    /// What the classifier sees this frame — updates every frame before confirmation.
+    /// What the dynamic classifier returned this frame (pre-confirmation).
     @Published private(set) var candidate: HandGesture = .none
 
-    /// How many consecutive matching frames have accumulated.
+    /// Consecutive matching frames accumulated toward confirmation.
     @Published private(set) var pendingCount: Int = 0
+
+    /// Current static hand shape (updated every frame, for debug HUD).
+    @Published private(set) var currentShape: StaticHandShape = .other
+
+    /// Current history fill level (for debug HUD).
+    @Published private(set) var historyFill: Int = 0
+
+    /// True while the grace window is absorbing non-pointing frames (for debug HUD).
+    @Published private(set) var isInGrace: Bool = false
 
     // MARK: - Output
 
     /// Called once per confirmed gesture on MainActor.
     var onHandGesture: ((HandGesture) -> Void)?
 
-    /// Return true to suppress hand firing while a body gesture is active.
-    /// Wired in ContentView to `interpreter.currentEvent != .none`.
-    var bodyEventActive: (() -> Bool)?
+    // MARK: - Recognizer
+
+    /// The active hand recognizer. Replace to swap gesture logic without changing this gate.
+    private let swipeRecognizer = HandSwipeRecognizer()
 
     // MARK: - Tuning
 
-    /// Minimum gap between fingertip.x and pip.x for "extended" (normalized, portrait-vertical).
-    private let extensionThreshold: Float = 0.04
-
-    /// Consecutive frames required before confirming a gesture.
-    private let confirmationFrames = 3
+    /// Consecutive matching frames required before confirming a gesture.
+    private let confirmationFrames = 2
 
     /// Minimum seconds between confirmed gestures.
-    private let cooldown: TimeInterval = 1.0
+    private let cooldown: TimeInterval = 0.8
 
     // MARK: - Private state
 
@@ -72,6 +83,18 @@ final class HandGestureInterpreter: ObservableObject {
     private var pendingFrameCount: Int = 0
     private var lastGestureTime: Date = .distantPast
     private var cancellables = Set<AnyCancellable>()
+
+    // MARK: - Profile-driven configuration
+
+    /// Apply recognizer config from the active GameProfile.
+    /// Call from ContentView.setupLayers() or whenever the active game changes.
+    func apply(profile: GameProfile) {
+        if profile.isEnabled(.handSwipe) {
+            swipeRecognizer.configure(with: profile.config(for: .handSwipe))
+        } else {
+            swipeRecognizer.reset()
+        }
+    }
 
     // MARK: - Wiring
 
@@ -83,13 +106,40 @@ final class HandGestureInterpreter: ObservableObject {
             .store(in: &cancellables)
     }
 
-    // MARK: - Processing (MainActor — called from RunLoop.main sink)
+    // MARK: - Per-frame processing (MainActor — called from RunLoop.main sink)
 
     private func process(hands: [HandSnapshot]) {
-        // Use the first hand only (highest-confidence result from HandEngine).
-        let gesture = hands.first.map { classify($0) } ?? .none
+        guard let hand = hands.first else {
+            swipeRecognizer.reset()
+            mirrorDebugState()
+            pushConfirmation(.none)
+            return
+        }
 
-        // Confirmation gate
+        let intent = swipeRecognizer.process(hand: hand)
+        mirrorDebugState()
+
+        // Convert AppIntent back to HandGesture for the confirmation gate and callback.
+        // The gate and downstream (InputCoordinator) still speak HandGesture.
+        let gesture: HandGesture
+        switch intent {
+        case .handSwipeLeft:  gesture = .swipeLeft
+        case .handSwipeRight: gesture = .swipeRight
+        default:              gesture = .none
+        }
+        pushConfirmation(gesture)
+    }
+
+    /// Sync published debug properties from the recognizer so the HUD stays live.
+    private func mirrorDebugState() {
+        currentShape = swipeRecognizer.currentShape
+        historyFill  = swipeRecognizer.historyFill
+        isInGrace    = swipeRecognizer.isInGrace
+    }
+
+    // MARK: - Confirmation + cooldown
+
+    private func pushConfirmation(_ gesture: HandGesture) {
         if gesture == pendingGesture {
             pendingFrameCount += 1
         } else {
@@ -97,60 +147,31 @@ final class HandGestureInterpreter: ObservableObject {
             pendingFrameCount = 1
         }
 
-        // Update published candidate every frame for debug HUD.
         candidate = pendingGesture
         pendingCount = pendingFrameCount
 
         guard pendingFrameCount >= confirmationFrames else { return }
 
-        // Confirmed .none — clear display.
         if gesture == .none {
             currentGesture = .none
             return
         }
 
-        // Cooldown check.
         let now = Date()
         guard now.timeIntervalSince(lastGestureTime) >= cooldown else { return }
-
-        // Precedence: do not fire while body gesture is active.
-        if bodyEventActive?() == true { return }
 
         lastGestureTime = now
         pendingFrameCount = 0
 
+        // Reset the recognizer so the same swipe can't retrigger from stale history.
+        swipeRecognizer.reset()
+
         currentGesture = gesture
-        print("🖐️ Hand gesture: \(gesture.displayName) → SPACE ↑")
+        print("🖐️ [Hand] Confirmed: \(gesture.displayName)")
         onHandGesture?(gesture)
 
-        // Auto-clear display after 0.8 s (matches body gesture flash duration).
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
             self?.currentGesture = .none
         }
-    }
-
-    // MARK: - Classifier
-
-    private func classify(_ hand: HandSnapshot) -> HandGesture {
-        let lm = hand.landmarks
-        guard lm.count == 21 else { return .none }
-
-        // lm.x = portrait vertical (0 = top of screen, 1 = bottom).
-        // Extended finger: fingertip is ABOVE its PIP joint → fingertip.x < pip.x.
-        // Threshold avoids triggering on partially-bent fingers.
-        func extended(tip tipIdx: Int, pip pipIdx: Int) -> Bool {
-            guard let tip = lm[tipIdx], let pip = lm[pipIdx] else { return false }
-            return tip.x < pip.x - extensionThreshold
-        }
-
-        let extendedFingers = [
-            extended(tip: 8,  pip: 6),   // index
-            extended(tip: 12, pip: 10),  // middle
-            extended(tip: 16, pip: 14),  // ring
-            extended(tip: 20, pip: 18),  // pinky
-        ].filter { $0 }.count
-
-        // All 4 non-thumb fingers must be extended.
-        return extendedFingers >= 4 ? .openPalm : .none
     }
 }

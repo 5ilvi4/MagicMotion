@@ -46,6 +46,7 @@ class MotionEngine: NSObject, ObservableObject {
 
     private var consecutiveMisses = 0
     private let maxMissesBeforeLost = 5
+    private var isSetUp = false
 
     // MARK: - Init
 
@@ -55,10 +56,11 @@ class MotionEngine: NSObject, ObservableObject {
     }
 
     func setupMediaPipe() {
+        guard !isSetUp else { return }
         #if canImport(MediaPipeTasksVision)
         guard let modelPath = Bundle.main.path(forResource: "pose_landmarker_full", ofType: "task") else {
             print("⚠️ MotionEngine: pose_landmarker_full.task not found in bundle")
-            return
+            return  // not marked as set up — allows retry if bundle changes
         }
         do {
             let options = PoseLandmarkerOptions()
@@ -69,11 +71,14 @@ class MotionEngine: NSObject, ObservableObject {
             options.minTrackingConfidence      = 0.5
             options.poseLandmarkerLiveStreamDelegate = self
             poseLandmarker = try PoseLandmarker(options: options)
+            isSetUp = true  // only set on successful detector creation
             print("✅ MotionEngine: MediaPipe PoseLandmarker ready")
         } catch {
             print("❌ MotionEngine: Failed to init PoseLandmarker — \(error)")
+            // not marked as set up — allows retry after transient failures
         }
         #else
+        isSetUp = true  // no detector to create; mark done to suppress repeated prints
         print("⚠️ MotionEngine: MediaPipeTasksVision not available in this build")
         #endif
     }

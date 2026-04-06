@@ -22,6 +22,9 @@ struct ContentView: View {
     @StateObject private var handEngine = HandEngine()
     @StateObject private var handInterpreter = HandGestureInterpreter()
 
+    // MARK: - Layer 3.5: Input Coordinator
+    @StateObject private var coordinator = InputCoordinator()
+
     // MARK: - Layer 3: Motion Interpreter
     @StateObject private var interpreter = MotionInterpreter()
 
@@ -39,6 +42,8 @@ struct ContentView: View {
     @StateObject private var profileManager = GameProfileManager()
 
     // MARK: - Layer 6: Diagnostics
+    @State private var didSetupLayers = false
+
     #if DEBUG
     @State private var useSyntheticInput = false  // set to true to bypass camera and use FakeMotionSource
     @State private var debugMode = true  // ← Auto-enable debug panel
@@ -332,6 +337,13 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
 
+                Button(action: { interpreter.resetLeanCalibration() }) {
+                    Label("Recalibrate Lean", systemImage: "figure.stand")
+                        .font(.caption.bold())
+                }
+                .buttonStyle(.bordered)
+                .tint(interpreter.isLeanCalibrated ? .primary : .orange)
+
                 Button(action: {
                     session.reset()
                     MotionSessionLogger.shared.reset()
@@ -440,7 +452,26 @@ struct ContentView: View {
                 landmarkRow("LWrist Y", fmt(d.leftWristY), "LShoulder Y", fmt(d.leftShoulderY))
                 landmarkRow("RWrist Y", fmt(d.rightWristY), "RShoulder Y", fmt(d.rightShoulderY))
                 landmarkRow("LHip Y",  fmt(d.leftHipY),   "RHip Y",      fmt(d.rightHipY))
-                landmarkRow("Lean Δ",  fmt(d.leanDelta),  "Hip rise",    fmt(d.hipRise))
+                // Lean Δ = calibrated (0=neutral); rawLean = before offset subtraction
+                landmarkRow("Lean Δ(cal)", fmt(d.leanDelta), "Lean(raw)", fmt(d.rawLeanDelta))
+                landmarkRow("Lean offset",
+                            String(format: "%+.3f", interpreter.leanNeutralOffset),
+                            interpreter.isLeanCalibrated ? "cal ✓" : "cal…",
+                            "")
+                // handsUpScore: negative means wrists above shoulders; fires when < -handsUpMargin
+                landmarkRow("HandsUp score", fmt(d.handsUpScore), "Jump/Squat", fmt(d.jumpMetric))
+            }
+
+            // Debug mode toggle: lean-only isolates lean from competing recognizers
+            HStack(spacing: 6) {
+                Button(action: { interpreter.debugLeanOnly.toggle() }) {
+                    Label(interpreter.debugLeanOnly ? "Lean Only ON" : "Lean Only OFF",
+                          systemImage: "figure.walk")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.bordered)
+                .tint(interpreter.debugLeanOnly ? .orange : .primary)
+                Spacer()
             }
 
             Divider().background(Color.white.opacity(0.3))
@@ -451,6 +482,12 @@ struct ContentView: View {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundColor(.cyan)
                 Spacer()
+                Text("shape: \(handInterpreter.currentShape.displayName)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(handInterpreter.currentShape == .pointing ? .yellow : .white.opacity(0.4))
+                Text("hist:\(handInterpreter.historyFill)/16\(handInterpreter.isInGrace ? " ⏳" : "")")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(handInterpreter.isInGrace ? .orange : .white.opacity(0.4))
             }
             HStack {
                 let cand = handInterpreter.candidate
@@ -463,9 +500,48 @@ struct ContentView: View {
                     .foregroundColor(.white.opacity(0.5))
                 Spacer()
                 if handInterpreter.currentGesture != .none {
-                    Text("→ SPACE ↑")
+                    Text(handInterpreter.currentGesture == .swipeLeft ? "Swipe Left" : "Swipe Right")
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.green)
+                        .foregroundColor(.yellow)
+                }
+            }
+
+            Divider().background(Color.white.opacity(0.3))
+
+            // ── InputCoordinator section ──────────────────────────
+            HStack(spacing: 4) {
+                Text("⚡ COORD")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.orange)
+                Spacer()
+                if let reason = coordinator.suppressionReason {
+                    Text("🚫 \(reason)")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(.red.opacity(0.8))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+            }
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("body: \(coordinator.lastBodyEvent == .none ? "—" : coordinator.lastBodyEvent.displayName)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(coordinator.lastBodyEvent == .none ? .gray : .cyan)
+                    Text("hand: \(coordinator.lastHandGesture == .none ? "—" : coordinator.lastHandGesture.displayName)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(coordinator.lastHandGesture == .none ? .gray :
+                            coordinator.suppressionReason != nil ? .red.opacity(0.7) : .yellow)
+                }
+                Spacer()
+                if coordinator.lastResolvedIntent != .none {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("→ \(coordinator.lastResolvedIntent.displayName)")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.green)
+                        Text("via \(coordinator.lastCommandSource.displayName)")
+                            .font(.system(size: 9))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
                 }
             }
         }
@@ -489,30 +565,45 @@ struct ContentView: View {
     // MARK: - Setup
 
     private func setupLayers() {
+        guard !didSetupLayers else { return }
+        didSetupLayers = true
+
         // Layer 2 → 3: Wire MotionEngine to MotionInterpreter
         motionEngine.delegate = interpreter
 
         // Layer 2 → 3b: Wire HandEngine to HandGestureInterpreter
         handInterpreter.connect(to: handEngine)
-        // Precedence: suppress hand gesture while a body event is active (auto-clears 0.8s).
-        handInterpreter.bodyEventActive = { [weak interpreter] in
-            interpreter?.currentEvent != .none
-        }
-        handInterpreter.onHandGesture = { [weak band] gesture in
-            guard gesture == .openPalm else { return }
-            band?.send(command: .spacebar)
+        // Hand gestures feed InputCoordinator — conflict gating happens there.
+        handInterpreter.onHandGesture = { [weak coordinator] gesture in
+            coordinator?.receive(handGesture: gesture)
         }
 
-        // Layer 3 → 4: Wire MotionInterpreter to GameSession + GameProfileManager + BLE Band
+        // Layer 3 → 4: Wire both interpreters through InputCoordinator.
         // Only set default game on first launch; UserDefaults restores the selection otherwise.
         if profileManager.getActiveProfileID() == nil {
             profileManager.setActiveGame(.subwaySurfers)
         }
-        interpreter.onMotionEvent = { [weak session, weak band, weak profileManager] event in
-            session?.handle(event: event)
-            if let command = profileManager?.mapEvent(event) {
+
+        // Unified intent path: coordinator → GameProfileManager → BandBLEManager
+        // Both body and hand flow through here after conflict resolution.
+        coordinator.onIntent = { [weak session, weak band, weak profileManager] intent in
+            // GameSession only understands MotionEvent (body actions).
+            // Map hand intents to the equivalent MotionEvent where applicable.
+            if case .leanLeft  = intent { session?.handle(event: .leanLeft)  }
+            if case .leanRight = intent { session?.handle(event: .leanRight) }
+            if case .jump      = intent { session?.handle(event: .jump)      }
+            if case .squat     = intent { session?.handle(event: .squat)     }
+            if case .handsUp   = intent { session?.handle(event: .handsUp)   }
+            if case .handsDown = intent { session?.handle(event: .handsDown) }
+            // Hand intents (.handSwipeLeft/.handSwipeRight) don't map to GameSession actions.
+
+            if let command = profileManager?.mapIntent(intent) {
                 band?.send(command: command)
             }
+        }
+        // Body events enter the coordinator.
+        interpreter.onMotionEvent = { [weak coordinator] event in
+            coordinator?.receive(bodyEvent: event)
         }
 
         // Wire logger: every snapshot goes to MotionSessionLogger

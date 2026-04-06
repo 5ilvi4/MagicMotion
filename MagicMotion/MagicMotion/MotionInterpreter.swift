@@ -25,9 +25,15 @@ struct GestureDebugInfo {
     var rightHipY: Float?
     var hipCenterX: Float?
     var shoulderCenterX: Float?
-    var leanDelta: Float?           // hipCenter.x - shoulderCenter.x
+    var leanDelta: Float?           // calibrated: hipCenter.x - shoulderCenter.x - neutralOffset (0 = personal neutral)
+    var rawLeanDelta: Float?        // raw hip.x - shoulder.x before calibration
     var hipRise: Float?             // relative to oldest frame in buffer
     var hipDrop: Float?
+    /// min(leftWristY - leftShoulderY, rightWristY - rightShoulderY)
+    /// Negative means wrists ABOVE shoulders. More negative = higher hands.
+    var handsUpScore: Float?
+    var jumpMetric: Float?          // hipRise used by jump check (positive = up)
+    var squatMetric: Float?         // hipDrop used by squat check (positive = down)
     var timestamp: Date
 
     static var empty: GestureDebugInfo {
@@ -36,7 +42,9 @@ struct GestureDebugInfo {
                          leftShoulderY: nil, rightShoulderY: nil,
                          leftHipY: nil, rightHipY: nil,
                          hipCenterX: nil, shoulderCenterX: nil,
-                         leanDelta: nil, hipRise: nil, hipDrop: nil,
+                         leanDelta: nil, rawLeanDelta: nil,
+                         hipRise: nil, hipDrop: nil,
+                         handsUpScore: nil, jumpMetric: nil, squatMetric: nil,
                          timestamp: .distantPast)
     }
 }
@@ -61,12 +69,20 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
     // MARK: - Tuning (can be driven by AppSessionState in future)
 
     var confidenceGate: Float = 0.5        // snapshots below this are treated as .none
-    var leanThreshold: Float = 0.08        // hip-to-shoulder lateral offset
-    var verticalJumpThreshold: Float = 0.08
+    var leanThreshold: Float = 0.10        // calibrated lean metric required to call a lean
+    /// Wrists must be this far ABOVE shoulders (in y, where y=0 is TOP) to fire handsUp.
+    /// 0.20 requires clearly raised arms; 0.05 was too easy to trigger accidentally.
+    var handsUpMargin: Float = 0.20
+    /// Hip vertical displacement (relative to oldest buffer frame) required for jump/squat.
+    /// 0.15 reduces false fires from postural sway and camera wobble during standing.
+    var verticalJumpThreshold: Float = 0.15
     var freezeSDThreshold: Float = 0.02    // std-dev of hipCenter.x across buffer
     /// Wrists must be this far BELOW hips (normalized) to fire handsDown.
     /// Natural arm-at-sides sits ~0.05–0.10 below hip; 0.15 requires a deliberate downward reach.
     var handsDownMargin: Float = 0.15
+
+    /// Debug: when true, only lean/neutral is classified. Use to verify lean sign in isolation.
+    @Published var debugLeanOnly: Bool = false
 
     // MARK: - Private state
 
@@ -88,6 +104,26 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
     // Freeze tracking
     private var freezeStartTime: Date? = nil
 
+    // MARK: - Lean calibration
+    // Records the natural hip-to-shoulder x offset of the person's standing posture
+    // so threshold is applied relative to their individual neutral, not absolute zero.
+
+    /// Auto-calibrated from the first `leanCalibrationTarget` reliable frames.
+    /// Subtracted from raw leanDelta before threshold comparison.
+    private(set) var leanNeutralOffset: Float = 0
+    private var leanCalibrationSamples: [Float] = []
+    private let leanCalibrationTarget = 30   // ~1 second at 30fps
+    private(set) var isLeanCalibrated = false
+
+    /// Clears the lean baseline so the next ~1s of reliable frames re-calibrates neutral.
+    /// Call when the user taps "Recalibrate Lean" or changes position significantly.
+    func resetLeanCalibration() {
+        leanNeutralOffset = 0
+        leanCalibrationSamples = []
+        isLeanCalibrated = false
+        print("🕹️ [Lean] Calibration reset — collecting new baseline")
+    }
+
     // MARK: - MotionEngineDelegate
 
     func motionEngine(_ engine: MotionEngine, didOutput snapshot: PoseSnapshot) {
@@ -102,6 +138,17 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
 
     func addSnapshot(_ snapshot: PoseSnapshot) {
         buffer.push(snapshot)
+
+        // Accumulate calibration samples during the first ~1s of reliable tracking.
+        if !isLeanCalibrated, snapshot.isReliable,
+           let hip = snapshot.hipCenter, let shoulder = snapshot.shoulderCenter {
+            leanCalibrationSamples.append(hip.x - shoulder.x)
+            if leanCalibrationSamples.count >= leanCalibrationTarget {
+                leanNeutralOffset = leanCalibrationSamples.reduce(0, +) / Float(leanCalibrationSamples.count)
+                isLeanCalibrated = true
+                print("🕹️ [Lean] Calibrated neutral offset: \(String(format: "%+.3f", leanNeutralOffset))")
+            }
+        }
 
         guard buffer.count >= 5 else { return }
 
@@ -118,10 +165,19 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
         let frames = buffer.elements
         let oldHip = frames.first?.hipCenter
         let nowHip = snapshot.hipCenter
-        let leanDelta: Float? = {
+        let rawLean: Float? = {
             guard let h = snapshot.hipCenter, let s = snapshot.shoulderCenter else { return nil }
             return h.x - s.x
         }()
+        let calibLean: Float? = rawLean.map { $0 - leanNeutralOffset }
+        let handsUpScore: Float? = {
+            guard let lw = snapshot.leftWrist,  let ls = snapshot.leftShoulder,
+                  let rw = snapshot.rightWrist, let rs = snapshot.rightShoulder else { return nil }
+            // Both wrists vs their respective shoulders. Negative = wrists above shoulders.
+            return min(lw.y - ls.y, rw.y - rs.y)
+        }()
+        let jumpMetric: Float?  = (oldHip != nil && nowHip != nil) ? oldHip!.y - nowHip!.y : nil
+        let squatMetric: Float? = (oldHip != nil && nowHip != nil) ? nowHip!.y - oldHip!.y : nil
         let info = GestureDebugInfo(
             confidence: snapshot.trackingConfidence,
             isReliable: snapshot.isReliable,
@@ -135,9 +191,13 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
             rightHipY: snapshot.rightHip?.y,
             hipCenterX: snapshot.hipCenter?.x,
             shoulderCenterX: snapshot.shoulderCenter?.x,
-            leanDelta: leanDelta,
-            hipRise: (oldHip != nil && nowHip != nil) ? oldHip!.y - nowHip!.y : nil,
-            hipDrop: (oldHip != nil && nowHip != nil) ? nowHip!.y - oldHip!.y : nil,
+            leanDelta: calibLean,
+            rawLeanDelta: rawLean,
+            hipRise: jumpMetric,
+            hipDrop: squatMetric,
+            handsUpScore: handsUpScore,
+            jumpMetric: jumpMetric,
+            squatMetric: squatMetric,
             timestamp: snapshot.timestamp
         )
         DispatchQueue.main.async { [weak self] in self?.debugInfo = info }
@@ -148,25 +208,28 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
     private func classify(latest: PoseSnapshot) -> MotionEvent {
         let frames = buffer.elements
 
-        // --- handsUp ---
-        // Checked first: deliberate bilateral raise, low false-positive risk.
-        if let lw = latest.leftWrist, let rw = latest.rightWrist,
-           let ls = latest.leftShoulder, let rs = latest.rightShoulder {
-            // y=0 is top: wrist y < shoulder y means wrist is ABOVE shoulder
-            if lw.y < ls.y - 0.05 && rw.y < rs.y - 0.05 {
-                return .handsUp
-            }
+        // --- leanLeft / leanRight ---
+        // Gated: no lean fires until calibration has completed (~1s of reliable frames).
+        // Uses calibrated metric: raw delta minus the person's natural standing offset.
+        // abs(calibrated) < leanThreshold => neutral deadzone.
+        if isLeanCalibrated,
+           let hip = latest.hipCenter, let shoulder = latest.shoulderCenter {
+            let rawDelta = hip.x - shoulder.x
+            let calibrated = rawDelta - leanNeutralOffset
+            if calibrated < -leanThreshold { return .leanLeft  }
+            if calibrated >  leanThreshold { return .leanRight }
         }
 
-        // --- leanLeft / leanRight ---
-        // Checked before handsDown: neutral arm position (wrists at sides) used to mask
-        // lean detection when handsDown was checked first. Lean is a primary game control.
-        if let hip = latest.hipCenter, let shoulder = latest.shoulderCenter {
-            if hip.x < shoulder.x - leanThreshold {
-                return .leanLeft
-            }
-            if hip.x > shoulder.x + leanThreshold {
-                return .leanRight
+        // debugLeanOnly: skip all other recognizers — use to verify lean sign in isolation.
+        if debugLeanOnly { return .none }
+
+        // --- handsUp ---
+        // Requires wrists clearly above shoulders (handsUpMargin = 0.20).
+        // y=0 is top: wrist y < shoulder y - margin means wrist is well ABOVE shoulder.
+        if let lw = latest.leftWrist, let rw = latest.rightWrist,
+           let ls = latest.leftShoulder, let rs = latest.rightShoulder {
+            if lw.y < ls.y - handsUpMargin && rw.y < rs.y - handsUpMargin {
+                return .handsUp
             }
         }
 
@@ -257,16 +320,15 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            // Log transition against lastConfirmedEvent, NOT currentEvent.
-            // currentEvent auto-clears after 0.8s (display-only), so reading it would
-            // produce repeated "– → gesture" entries after each reset.
+            // Log and forward only on state transition — prevents repeated BLE commands
+            // and coordinator spam while the user holds the same gesture.
             if self.lastConfirmedEvent != event {
                 print("🕹️ Gesture: \(self.lastConfirmedEvent.displayName) → \(event.displayName)")
                 self.lastConfirmedEvent = event
                 self.confirmedEvent = event
+                self.onMotionEvent?(event)
             }
             self.currentEvent = event
-            self.onMotionEvent?(event)
         }
 
         // Auto-clear display after 0.8s (does not affect lastConfirmedEvent)

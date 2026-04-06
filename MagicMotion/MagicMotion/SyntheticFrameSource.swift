@@ -5,6 +5,7 @@
 // Used in debug/test builds to drive the pipeline without a real camera.
 
 import AVFoundation
+import Combine
 import CoreMedia
 import CoreVideo
 

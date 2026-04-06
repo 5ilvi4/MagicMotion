@@ -12,6 +12,10 @@ class FakeMotionSource {
 
     weak var delegate: MotionEngineDelegate?
 
+    // Reused across all delegate callbacks so MotionEngineStub is never
+    // allocated more than once — avoids triggering MotionEngine.init() repeatedly.
+    private let stub = MotionEngineStub()
+
     private var workItem: DispatchWorkItem?
 
     // MARK: - Playback
@@ -29,9 +33,7 @@ class FakeMotionSource {
             let snap = entry.snapshot
             DispatchQueue.main.asyncAfter(deadline: .now() + cumulativeDelay) { [weak self] in
                 guard let self = self, !(self.workItem?.isCancelled ?? true) else { return }
-                self.delegate?.motionEngine(
-                    // FakeMotionSource is not a MotionEngine — pass a stub that satisfies the protocol
-                    MotionEngineStub(), didOutput: snap)
+                self.delegate?.motionEngine(self.stub, didOutput: snap)
             }
         }
     }
@@ -52,7 +54,7 @@ class FakeMotionSource {
         case .squat:     snap = FakeMotionSource.squatScript.last?.snapshot ?? .empty()
         default:         snap = .empty()
         }
-        delegate?.motionEngine(MotionEngineStub(), didOutput: snap)
+        delegate?.motionEngine(stub, didOutput: snap)
     }
 
     // MARK: - Static fixture scripts
