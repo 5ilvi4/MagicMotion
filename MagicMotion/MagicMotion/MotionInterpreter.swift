@@ -68,7 +68,7 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
 
     // MARK: - Tuning (can be driven by AppSessionState in future)
 
-    var confidenceGate: Float = 0.5        // snapshots below this are treated as .none
+    var confidenceGate: Float = 0.6        // entry and classify gate; 0.6 > isReliable's hardcoded 0.5
     var leanThreshold: Float = 0.10        // calibrated lean metric required to call a lean
     /// Wrists must be this far ABOVE shoulders (in y, where y=0 is TOP) to fire handsUp.
     /// 0.20 requires clearly raised arms; 0.05 was too easy to trigger accidentally.
@@ -83,6 +83,11 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
 
     /// Debug: when true, only lean/neutral is classified. Use to verify lean sign in isolation.
     @Published var debugLeanOnly: Bool = false
+
+    // MARK: - Profile-driven configuration
+
+    /// Which recognizers are active for the current game. nil = all enabled (default).
+    private var enabledRecognizers: Set<RecognizerID>? = nil
 
     // MARK: - Private state
 
@@ -124,14 +129,91 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
         print("🕹️ [Lean] Calibration reset — collecting new baseline")
     }
 
+    func apply(profile: GameProfile) {
+        if let list = profile.enabledRecognizers {
+            enabledRecognizers = Set(list)
+        } else {
+            enabledRecognizers = nil
+        }
+
+        let leanCfg      = profile.config(for: .bodyLean)
+        let jumpCfg      = profile.config(for: .bodyJump)
+        let squatCfg     = profile.config(for: .bodySquat)
+        let handsUpCfg   = profile.config(for: .bodyHandsUp)
+        let handsDownCfg = profile.config(for: .bodyHandsDown)
+
+        if let v = leanCfg["threshold"]    { leanThreshold         = Float(v) }
+        if let v = jumpCfg["threshold"]    { verticalJumpThreshold = Float(v) }
+        if let v = squatCfg["threshold"]   { verticalJumpThreshold = Float(v) }
+        if let v = handsUpCfg["margin"]    { handsUpMargin         = Float(v) }
+        if let v = handsDownCfg["margin"]  { handsDownMargin       = Float(v) }
+
+        let label = enabledRecognizers.map { $0.map(\.rawValue).sorted().joined(separator: ",") } ?? "all"
+        print("🕹️ [MotionInterpreter] Applied profile '\(profile.displayName)' — enabled: \(label)")
+    }
+
+    private func isEnabled(_ id: RecognizerID) -> Bool {
+        guard let set = enabledRecognizers else { return true }
+        return set.contains(id)
+    }
+
     // MARK: - MotionEngineDelegate
 
     func motionEngine(_ engine: MotionEngine, didOutput snapshot: PoseSnapshot) {
+        // Confidence gate — frames at or below confidenceGate are discarded before
+        // entering the pipeline. Prevents partial/corrupt-landmark frames from
+        // accumulating in the ring buffer, building up pending counts, or skewing
+        // lean calibration samples.
+        guard snapshot.trackingConfidence > confidenceGate else {
+            #if DEBUG
+            print("🕹️ [MotionInterpreter] Frame rejected: confidence \(String(format: "%.2f", snapshot.trackingConfidence)) ≤ \(confidenceGate)")
+            #endif
+            return
+        }
+
+        // Core landmark bounds gate — rejects off-frame coordinates (e.g. y < 0) that
+        // pass MediaPipe's visibility threshold but carry geometrically invalid values.
+        // All four core landmarks must be present and within normalized [0, 1] space
+        // before the frame is allowed to affect buffer state or calibration.
+        guard let ls = snapshot.leftShoulder,  let rs = snapshot.rightShoulder,
+              let lh = snapshot.leftHip,       let rh = snapshot.rightHip,
+              ls.x >= 0, ls.x <= 1, ls.y >= 0, ls.y <= 1,
+              rs.x >= 0, rs.x <= 1, rs.y >= 0, rs.y <= 1,
+              lh.x >= 0, lh.x <= 1, lh.y >= 0, lh.y <= 1,
+              rh.x >= 0, rh.x <= 1, rh.y >= 0, rh.y <= 1 else {
+            #if DEBUG
+            let coords = [snapshot.leftShoulder, snapshot.rightShoulder,
+                          snapshot.leftHip, snapshot.rightHip]
+                .map { lm -> String in
+                    guard let lm else { return "nil" }
+                    return "(\(String(format: "%.3f", lm.x)),\(String(format: "%.3f", lm.y)))"
+                }
+            print("🕹️ [MotionInterpreter] Frame rejected: core landmark out of bounds — LS:\(coords[0]) RS:\(coords[1]) LH:\(coords[2]) RH:\(coords[3])")
+            #endif
+            return
+        }
+
         addSnapshot(snapshot)
     }
 
     func motionEngineDidLoseTracking(_ engine: MotionEngine) {
-        pushConfirmation(.none)
+        // Hard reset on tracking loss — clears buffer, pending confirmation state, freeze
+        // timer, and lean calibration so no stale gesture state survives into the next
+        // tracking session. pushConfirmation(.none) alone was insufficient: it only sets
+        // pendingCount = 1, which never reaches confirmationFrames (3) when no further
+        // frames arrive while tracking is lost.
+        buffer = RingBuffer<PoseSnapshot>(capacity: buffer.capacity)
+        pendingEvent = .none
+        pendingCount = 0
+        freezeStartTime = nil
+        resetLeanCalibration()
+        print("🕹️ [MotionInterpreter] Tracking lost — full state reset")
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lastConfirmedEvent = .none
+            self.confirmedEvent = .none
+            self.currentEvent = .none
+        }
     }
 
     // MARK: - Core
@@ -140,7 +222,9 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
         buffer.push(snapshot)
 
         // Accumulate calibration samples during the first ~1s of reliable tracking.
-        if !isLeanCalibrated, snapshot.isReliable,
+        // confidenceGate replaces PoseSnapshot.isReliable's hardcoded 0.5 so this
+        // threshold is tunable from the same knob as the entry gate.
+        if !isLeanCalibrated, snapshot.trackingConfidence > confidenceGate,
            let hip = snapshot.hipCenter, let shoulder = snapshot.shoulderCenter {
             leanCalibrationSamples.append(hip.x - shoulder.x)
             if leanCalibrationSamples.count >= leanCalibrationTarget {
@@ -153,7 +237,8 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
         guard buffer.count >= 5 else { return }
 
         let classified: MotionEvent
-        if !snapshot.isReliable {
+        // confidenceGate replaces PoseSnapshot.isReliable's hardcoded 0.5 threshold.
+        if snapshot.trackingConfidence <= confidenceGate {
             classified = .none
         } else {
             classified = classify(latest: snapshot)
@@ -208,69 +293,97 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
     private func classify(latest: PoseSnapshot) -> MotionEvent {
         let frames = buffer.elements
 
-        // --- leanLeft / leanRight ---
-        // Gated: no lean fires until calibration has completed (~1s of reliable frames).
-        // Uses calibrated metric: raw delta minus the person's natural standing offset.
-        // abs(calibrated) < leanThreshold => neutral deadzone.
-        if isLeanCalibrated,
-           let hip = latest.hipCenter, let shoulder = latest.shoulderCenter {
-            let rawDelta = hip.x - shoulder.x
-            let calibrated = rawDelta - leanNeutralOffset
-            if calibrated < -leanThreshold { return .leanLeft  }
-            if calibrated >  leanThreshold { return .leanRight }
+        // STEP 1 — Core landmark guard.
+        // Redundant with entry guard but defensive — classify() is also callable
+        // from tests with synthetic snapshots that bypass motionEngine(_:didOutput:).
+        // ls, rs, lh, rh remain in scope for all subsequent steps.
+        guard let ls = latest.leftShoulder,  let rs = latest.rightShoulder,
+              let lh = latest.leftHip,       let rh = latest.rightHip,
+              ls.x >= 0, ls.x <= 1, ls.y >= 0, ls.y <= 1,
+              rs.x >= 0, rs.x <= 1, rs.y >= 0, rs.y <= 1,
+              lh.x >= 0, lh.x <= 1, lh.y >= 0, lh.y <= 1,
+              rh.x >= 0, rh.x <= 1, rh.y >= 0, rh.y <= 1 else {
+            return .none
         }
 
-        // debugLeanOnly: skip all other recognizers — use to verify lean sign in isolation.
+        // STEP 2 — Lean left / lean right.
+        // Gated: no lean fires until calibration has completed (~1s of reliable frames).
+        // calibrated = (hipCenter.x - shoulderCenter.x) - leanNeutralOffset
+        // leanThreshold = 0.10: deadzone of ±10% of frame width around personal neutral.
+        if isLeanCalibrated, isEnabled(.bodyLean),
+           let hip = latest.hipCenter, let shoulder = latest.shoulderCenter {
+            let rawDelta   = hip.x - shoulder.x
+            let calibrated = rawDelta - leanNeutralOffset
+            if calibrated < -leanThreshold { return .leanLeft  }   // hip left of shoulder
+            if calibrated >  leanThreshold { return .leanRight }   // hip right of shoulder
+        }
+
+        // STEP 3 — Lean-only debug mode: skip all remaining recognizers.
+        // Enables verifying lean sign convention without interference from other gestures.
         if debugLeanOnly { return .none }
 
-        // --- handsUp ---
-        // Requires wrists clearly above shoulders (handsUpMargin = 0.20).
-        // y=0 is top: wrist y < shoulder y - margin means wrist is well ABOVE shoulder.
-        if let lw = latest.leftWrist, let rw = latest.rightWrist,
-           let ls = latest.leftShoulder, let rs = latest.rightShoulder {
+        // STEP 4 — Hands up.
+        // y=0 is TOP of frame: wrist.y < shoulder.y means the wrist is physically above
+        // the shoulder. handsUpMargin = 0.20 requires clearly raised arms — 0.05 was
+        // too easily triggered by natural arm elevation during walking or gesturing.
+        // Wrist landmarks are bounds-checked to prevent an off-frame wrist (y < 0 from
+        // partial occlusion) from producing a falsely large negative margin.
+        // ls and rs are already guaranteed non-nil and in-bounds by STEP 1.
+        if isEnabled(.bodyHandsUp),
+           let lw = latest.leftWrist, let rw = latest.rightWrist,
+           lw.x >= 0, lw.x <= 1, lw.y >= 0, lw.y <= 1,
+           rw.x >= 0, rw.x <= 1, rw.y >= 0, rw.y <= 1 {
             if lw.y < ls.y - handsUpMargin && rw.y < rs.y - handsUpMargin {
                 return .handsUp
             }
         }
 
-        // --- jump (hip rose relative to oldest frame in buffer) ---
-        if frames.count >= 11,
+        // STEP 5 — Jump (hip rose relative to oldest frame in buffer).
+        // Requires 11 frames so the reference hip position is ~367ms old at 30fps.
+        // hipRise > 0: y decreased, meaning the hip moved upward (y=0 is top).
+        // verticalJumpThreshold = 0.15: reduces false fires from postural sway and
+        // camera wobble that can produce ~0.08 variation during normal standing.
+        if isEnabled(.bodyJump), frames.count >= 11,
            let oldHip = frames[0].hipCenter,
            let nowHip = latest.hipCenter {
-            // y decreases upward in MediaPipe
-            let hipRise = oldHip.y - nowHip.y  // positive = moved up
-            if hipRise > verticalJumpThreshold {
-                return .jump
-            }
+            let hipRise = oldHip.y - nowHip.y   // positive = hip moved up
+            if hipRise > verticalJumpThreshold { return .jump }
         }
 
-        // --- squat (hip dropped relative to oldest frame) ---
-        if frames.count >= 11,
+        // STEP 6 — Squat (hip dropped relative to oldest frame in buffer).
+        // Same buffer depth as jump; opposite sign on the delta.
+        if isEnabled(.bodySquat), frames.count >= 11,
            let oldHip = frames[0].hipCenter,
            let nowHip = latest.hipCenter {
-            let hipDrop = nowHip.y - oldHip.y  // positive = moved down
-            if hipDrop > verticalJumpThreshold {
-                return .squat
-            }
+            let hipDrop = nowHip.y - oldHip.y   // positive = hip moved down
+            if hipDrop > verticalJumpThreshold { return .squat }
         }
 
-        // --- handsDown ---
-        // Checked last among arm/body events. Requires handsDownMargin below hips to avoid
-        // firing in neutral arm-at-sides posture (~0.05–0.10 below hip in practice).
-        if let lw = latest.leftWrist, let rw = latest.rightWrist,
-           let lh = latest.leftHip, let rh = latest.rightHip {
+        // STEP 7 — Hands down.
+        // Checked last among arm events. handsDownMargin = 0.15 requires a deliberate
+        // downward reach: natural arm-at-sides sits only ~0.05–0.10 below the hip.
+        // Wrist landmarks are bounds-checked so a wrist below the bottom of the frame
+        // (y > 1) does not falsely satisfy lw.y > lh.y + margin.
+        // lh and rh are already guaranteed non-nil and in-bounds by STEP 1.
+        if isEnabled(.bodyHandsDown),
+           let lw = latest.leftWrist, let rw = latest.rightWrist,
+           lw.x >= 0, lw.x <= 1, lw.y >= 0, lw.y <= 1,
+           rw.x >= 0, rw.x <= 1, rw.y >= 0, rw.y <= 1 {
             if lw.y > lh.y + handsDownMargin && rw.y > rh.y + handsDownMargin {
                 return .handsDown
             }
         }
 
-        // --- freeze (std-dev of hipCenter.x < threshold) ---
+        // STEP 8 — Freeze (std-dev of hipCenter.x across full buffer < threshold).
+        // Only evaluated when the buffer is completely full (15 frames = ~0.5s at 30fps)
+        // to ensure a stable positional baseline.
+        // freezeSDThreshold = 0.02: ~2% of frame width; body must be essentially still.
         if frames.count == buffer.capacity {
             let xs = frames.compactMap { $0.hipCenter?.x }
             if xs.count == buffer.capacity {
-                let mean = xs.reduce(0, +) / Float(xs.count)
+                let mean     = xs.reduce(0, +) / Float(xs.count)
                 let variance = xs.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Float(xs.count)
-                let sd = sqrt(variance)
+                let sd       = sqrt(variance)
                 if sd < freezeSDThreshold {
                     let now = Date()
                     if freezeStartTime == nil { freezeStartTime = now }
@@ -280,9 +393,10 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
             }
         }
 
-        // Reset freeze timer when body moves
+        // Reset freeze timer whenever the body is in motion.
         freezeStartTime = nil
 
+        // STEP 9 — No gesture detected.
         return .none
     }
 

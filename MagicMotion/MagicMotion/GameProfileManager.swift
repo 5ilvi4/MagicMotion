@@ -27,6 +27,9 @@ final class GameProfileManager: ObservableObject {
     /// Last MotionEvent that had no mapping in the active profile. Nil until first miss.
     @Published private(set) var lastUnmappedEvent: MotionEvent?
 
+    /// Called on MainActor whenever the active profile changes via setActiveGame(_:).
+    var onProfileChanged: ((GameProfile) -> Void)?
+
     // MARK: - Storage
 
     private let store = GameProfileStore()
@@ -82,6 +85,7 @@ final class GameProfileManager: ObservableObject {
         lastMappedCommand = nil
         lastUnmappedEvent = nil
         store.setActiveProfile(gameID: gameID)
+        onProfileChanged?(profile)
         log("🎮 Active game: \(profile.displayName) — \(profile.mapping.count) mappings")
     }
 

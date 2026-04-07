@@ -101,17 +101,6 @@ final class BandBLEManager: NSObject, ObservableObject {
         log("📡 \(eventName) → 0x\(String(format: "%02X", byte))")
     }
 
-    /// Convenience bridge from the app's Gesture enum.
-    func send(gesture: Gesture) {
-        switch gesture {
-        case .swipeLeft:       send(event: .leanLeft)
-        case .swipeRight:      send(event: .leanRight)
-        case .jump, .swipeUp: send(event: .jump)
-        case .swipeDown:       send(event: .squat)
-        case .none:            break
-        }
-    }
-
     /// Send a GameCommand produced by GameProfileManager.
     /// lastSentCommand is only updated when the byte is actually handed to the BLE queue.
     func send(command: GameCommand) {

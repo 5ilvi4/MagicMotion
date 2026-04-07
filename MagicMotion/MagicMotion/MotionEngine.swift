@@ -146,10 +146,15 @@ extension MotionEngine: PoseLandmarkerLiveStreamDelegate {
         }
         // Compute overall confidence as average visibility of key landmarks
         let keyIndices = [11, 12, 23, 24, 25, 26, 27, 28]
-        let avgVis = keyIndices.compactMap { i -> Float? in
+        let visibilities = keyIndices.compactMap { i -> Float? in
             guard i < landmarks.count else { return nil }
             return landmarks[i].visibility?.floatValue
-        }.reduce(0, +) / Float(keyIndices.count)
+        }
+        // Divide by actual visible count, not keyIndices.count.
+        // Previously dividing by 8 always deflated confidence when landmarks
+        // were partially occluded, producing values of 0.18–0.20 even during
+        // normal tracking and causing the confidence gate to reject all frames.
+        let avgVis = visibilities.isEmpty ? 0 : visibilities.reduce(0, +) / Float(visibilities.count)
 
         let snapshot = PoseSnapshot(
             timestamp:          Date(),

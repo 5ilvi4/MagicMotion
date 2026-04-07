@@ -584,6 +584,18 @@ struct ContentView: View {
             profileManager.setActiveGame(.subwaySurfers)
         }
 
+        // Apply active profile immediately to both interpreters
+        if let profile = profileManager.activeProfile {
+            interpreter.apply(profile: profile)
+            handInterpreter.apply(profile: profile)
+        }
+
+        // Reconfigure both interpreters whenever the active game changes
+        profileManager.onProfileChanged = { [weak interpreter, weak handInterpreter] profile in
+            interpreter?.apply(profile: profile)
+            handInterpreter?.apply(profile: profile)
+        }
+
         // Unified intent path: coordinator → GameProfileManager → BandBLEManager
         // Both body and hand flow through here after conflict resolution.
         coordinator.onIntent = { [weak session, weak band, weak profileManager] intent in
