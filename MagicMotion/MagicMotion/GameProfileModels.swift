@@ -24,6 +24,36 @@ enum GameID: String, Codable, CaseIterable {
         case .crossyRoad:    return "crossy_road"
         }
     }
+
+    /// URL scheme used to deep-link into the game. nil = not installed / unknown.
+    ///
+    /// Verification status:
+    ///   subwaySurfers — "subwaysurfers://" confirmed via App Store listing and community sources.
+    ///   templeRun     — "imobi://" is the registered scheme for Temple Run 2 (not "templerun2://").
+    ///                   TODO: verify against the actual installed app before shipping.
+    ///   crossyRoad    — No public URL scheme documented by Hipster Whale.
+    ///                   TODO: verify or remove before shipping — may have no deep-link support.
+    var urlScheme: String? {
+        switch self {
+        case .subwaySurfers: return "subwaysurfers://"
+        case .templeRun:     return nil   // TODO: verify Temple Run 2 URL scheme before enabling
+        case .crossyRoad:    return nil   // TODO: verify Crossy Road URL scheme before enabling
+        }
+    }
+
+    /// App Store numeric ID for fallback install prompt.
+    ///
+    /// Verification status:
+    ///   subwaySurfers — 533239571 confirmed.
+    ///   templeRun     — 579827023 confirmed (Temple Run 2).
+    ///   crossyRoad    — 924979111 confirmed.
+    var appStoreID: String {
+        switch self {
+        case .subwaySurfers: return "533239571"
+        case .templeRun:     return "579827023"
+        case .crossyRoad:    return "924979111"
+        }
+    }
 }
 
 // MARK: - Game Command
@@ -42,6 +72,16 @@ enum GameCommand: UInt8, Codable, CaseIterable {
         case .rightArrow: return "RIGHT →"
         case .spacebar:   return "SPACE"
         case .downArrow:  return "DOWN ↓"
+        }
+    }
+
+    /// Human-readable in-game action name shown in the gesture list.
+    var gameActionName: String {
+        switch self {
+        case .leftArrow:  return "Move Left"
+        case .rightArrow: return "Move Right"
+        case .spacebar:   return "Jump / Fly"
+        case .downArrow:  return "Slide / Roll"
         }
     }
 }

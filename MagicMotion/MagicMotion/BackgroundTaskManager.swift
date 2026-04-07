@@ -13,6 +13,17 @@ class BackgroundTaskManager {
     static let shared = BackgroundTaskManager()
     private init() {}
 
+    // MARK: - Lifecycle callbacks
+    // Wire these in ContentView.setupLayers() to react to app backgrounding/foregrounding.
+
+    /// Called on the main thread when the app is about to enter the background.
+    /// Use to pause any active controller session.
+    var onDidEnterBackground: (() -> Void)?
+
+    /// Called on the main thread when the app has returned to the foreground.
+    /// Use to assess whether a paused session should present a resume prompt.
+    var onWillEnterForeground: (() -> Void)?
+
     // MARK: - State
 
     private(set) var isInBackground = false
@@ -26,6 +37,7 @@ class BackgroundTaskManager {
         guard !isInBackground else { return }
         isInBackground = true
         print("🔄 BackgroundTaskManager: starting background processing")
+        DispatchQueue.main.async { [weak self] in self?.onDidEnterBackground?() }
 
         backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "MotionMind.KeepAlive") {
             print("⏰ BackgroundTaskManager: task expiring — renewing")
@@ -40,6 +52,7 @@ class BackgroundTaskManager {
         guard isInBackground else { return }
         isInBackground = false
         print("🔄 BackgroundTaskManager: ending background processing")
+        DispatchQueue.main.async { [weak self] in self?.onWillEnterForeground?() }
 
         stopKeepAliveTimer()
 

@@ -45,6 +45,51 @@ enum AppIntent: Equatable {
         }
     }
 
+    /// Plain-English description of the physical motion. Shown in the gesture list.
+    var motionDescription: String {
+        switch self {
+        case .handsUp:        return "Raise both hands above your shoulders"
+        case .handsDown:      return "Lower both hands to your sides"
+        case .leanLeft:       return "Shift your weight to the left"
+        case .leanRight:      return "Shift your weight to the right"
+        case .jump:           return "Jump up"
+        case .squat:          return "Bend your knees and squat down"
+        case .handSwipeLeft:  return "Swipe your hand to the left"
+        case .handSwipeRight: return "Swipe your hand to the right"
+        case .none:           return "—"
+        }
+    }
+
+    /// SF Symbol name representing the motion. Used in GestureListView.
+    var symbolName: String {
+        switch self {
+        case .handsUp:        return "arrow.up.to.line"
+        case .handsDown:      return "arrow.down.to.line"
+        case .leanLeft:       return "arrow.left"
+        case .leanRight:      return "arrow.right"
+        case .jump:           return "figure.jumprope"
+        case .squat:          return "arrow.down.circle"
+        case .handSwipeLeft:  return "hand.draw"
+        case .handSwipeRight: return "hand.draw"
+        case .none:           return "minus"
+        }
+    }
+
+    /// Display order in the gesture list (body gestures before hand gestures).
+    var sortOrder: Int {
+        switch self {
+        case .leanLeft:       return 0
+        case .leanRight:      return 1
+        case .jump:           return 2
+        case .squat:          return 3
+        case .handsUp:        return 4
+        case .handsDown:      return 5
+        case .handSwipeLeft:  return 6
+        case .handSwipeRight: return 7
+        case .none:           return 99
+        }
+    }
+
     // MARK: - Conversions from existing types
 
     static func from(_ event: MotionEvent) -> AppIntent {

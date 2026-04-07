@@ -1,9 +1,15 @@
 // ExternalDisplayManager.swift
-// MotionMind
+// MagicMotion
 //
 // Layer 5 — Presentation.
 // Manages a UIWindow on an external screen (HDMI / AirPlay).
-// TV = kid-facing GameView.  iPad = operator surface (managed by ContentView).
+//
+// Canonical path: connect(to:controllerSession:interpreter:cameraManager:)
+//   → HomeMonitorView — driven by ControllerSession, no GameSession dependency.
+//
+// Legacy demo overloads (connect(to:session:*)) are kept in the LEGACY DEMO
+// section below so they compile if other demo code still references them.
+// They are not called from ContentView and can be deleted with LegacyDemo/.
 
 import UIKit
 import SwiftUI
@@ -30,8 +36,8 @@ class ExternalDisplayManager: ObservableObject {
         ) { [weak self] notification in
             guard let screen = notification.object as? UIScreen else { return }
             self?.isExternalDisplayConnected = true
-            // ContentView observes isExternalDisplayConnected and calls connect(to:session:)
-            _ = screen // silence unused warning
+            // ContentView observes isExternalDisplayConnected and calls connect(to:controllerSession:).
+            _ = screen
         }
 
         disconnectObserver = NotificationCenter.default.addObserver(
@@ -41,7 +47,6 @@ class ExternalDisplayManager: ObservableObject {
             self?.disconnect()
         }
 
-        // Already connected at launch?
         if UIScreen.screens.count > 1 {
             isExternalDisplayConnected = true
         }
@@ -53,37 +58,28 @@ class ExternalDisplayManager: ObservableObject {
         }
     }
 
-    // MARK: - Connect / disconnect
+    // MARK: - Canonical Home connect
 
-    /// Create a UIWindow on the external screen and display ParentMonitorView on it.
-    func connect(to screen: UIScreen, session: GameSession, interpreter: MotionInterpreter, cameraManager: CameraManager) {
+    /// Show HomeMonitorView on the external screen.
+    /// This is the canonical MagicMotion Home connect path.
+    func connect(to screen: UIScreen,
+                 controllerSession: ControllerSession,
+                 interpreter: MotionInterpreter,
+                 cameraManager: CameraManager) {
         guard externalWindow == nil else { return }
 
         let window = UIWindow(frame: screen.bounds)
         window.screen = screen
-        let monitorView = ParentMonitorView(
+        let view = HomeMonitorView(
+            controllerSession: controllerSession,
             interpreter: interpreter,
-            session: session,
             cameraManager: cameraManager
         )
-        window.rootViewController = UIHostingController(rootView: monitorView)
+        window.rootViewController = UIHostingController(rootView: view)
         window.makeKeyAndVisible()
         externalWindow = window
         isExternalDisplayConnected = true
-        print("📺 ExternalDisplayManager: ParentMonitorView created on external screen \(screen.bounds.size)")
-    }
-
-    /// Legacy overload — shows GameView (fallback for older callers).
-    func connect(to screen: UIScreen, session: GameSession) {
-        guard externalWindow == nil else { return }
-
-        let window = UIWindow(frame: screen.bounds)
-        window.screen = screen
-        window.rootViewController = UIHostingController(rootView: GameView(session: session))
-        window.makeKeyAndVisible()
-        externalWindow = window
-        isExternalDisplayConnected = true
-        print("📺 ExternalDisplayManager: GameView (fallback) created on external screen")
+        print("📺 ExternalDisplayManager: HomeMonitorView on external screen \(screen.bounds.size)")
     }
 
     func disconnect() {
@@ -91,5 +87,36 @@ class ExternalDisplayManager: ObservableObject {
         externalWindow = nil
         isExternalDisplayConnected = false
         print("📱 ExternalDisplayManager: external window removed")
+    }
+
+    // MARK: - LEGACY DEMO overloads
+    // These are NOT called from ContentView.
+    // Kept only so LegacyDemo code that may reference them still compiles.
+    // Delete together with LegacyDemo/.
+
+    @available(*, deprecated, renamed: "connect(to:controllerSession:interpreter:cameraManager:)")
+    func connect(to screen: UIScreen, session: GameSession, interpreter: MotionInterpreter, cameraManager: CameraManager) {
+        guard externalWindow == nil else { return }
+        let window = UIWindow(frame: screen.bounds)
+        window.screen = screen
+        window.rootViewController = UIHostingController(
+            rootView: ParentMonitorView(interpreter: interpreter, session: session, cameraManager: cameraManager)
+        )
+        window.makeKeyAndVisible()
+        externalWindow = window
+        isExternalDisplayConnected = true
+        print("📺 [LEGACY DEMO] ExternalDisplayManager: ParentMonitorView on external screen")
+    }
+
+    @available(*, deprecated, renamed: "connect(to:controllerSession:interpreter:cameraManager:)")
+    func connect(to screen: UIScreen, session: GameSession) {
+        guard externalWindow == nil else { return }
+        let window = UIWindow(frame: screen.bounds)
+        window.screen = screen
+        window.rootViewController = UIHostingController(rootView: GameView(session: session))
+        window.makeKeyAndVisible()
+        externalWindow = window
+        isExternalDisplayConnected = true
+        print("📺 [LEGACY DEMO] ExternalDisplayManager: GameView on external screen")
     }
 }

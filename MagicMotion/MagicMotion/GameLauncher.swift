@@ -64,6 +64,29 @@ class GameLauncher: ObservableObject {
         }
     }
 
+    /// Launch the game associated with a GameID.
+    /// Falls back to App Store if not installed or URL scheme is unknown.
+    func launch(game: GameID) {
+        guard let scheme = game.urlScheme else {
+            print("🎮 GameLauncher: no URL scheme for \(game.rawValue)")
+            return
+        }
+        guard let url = URL(string: scheme), UIApplication.shared.canOpenURL(url) else {
+            print("🎮 GameLauncher: \(game.rawValue) not installed — opening App Store")
+            let appStoreURL = "https://apps.apple.com/app/id\(game.appStoreID)"
+            if let storeURL = URL(string: appStoreURL) {
+                UIApplication.shared.open(storeURL)
+            }
+            return
+        }
+        UIApplication.shared.open(url) { [weak self] success in
+            DispatchQueue.main.async {
+                self?.gameRunning = success
+                print("🎮 GameLauncher: launch \(game.rawValue) \(success ? "✅" : "❌")")
+            }
+        }
+    }
+
     /// Call when the user returns to MotionMind from the game.
     func returnFromGame() {
         gameRunning = false

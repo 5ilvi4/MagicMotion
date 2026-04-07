@@ -120,6 +120,22 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
     /// ContentView may use this to pause the game or show a "step back" prompt.
     var onSafetyZoneViolation: (() -> Void)?
 
+    // MARK: - Tracking loss / recovery
+
+    /// Called (on main thread) when tracking is lost — confidence gate fails
+    /// consistently enough for MotionEngine to declare `motionEngineDidLoseTracking`.
+    /// Wire to `controllerSession.pause(reason: .trackingLost)` in ContentView.
+    var onTrackingLost: (() -> Void)?
+
+    /// Called (on main thread) when the first high-confidence frame arrives after
+    /// a period of lost tracking. Auto-resume is safe only when the prior pause reason
+    /// was `.trackingLost` — callers must verify the reason before resuming.
+    var onTrackingRestored: (() -> Void)?
+
+    /// True between `motionEngineDidLoseTracking` and the next good frame.
+    /// Used to fire `onTrackingRestored` exactly once per loss/recovery cycle.
+    private var isTrackingLost: Bool = false
+
     // MARK: - Profile-driven sensitivity defaults
     // Set by apply(profile:) from recognizerConfig["sensitivity"].
     // Represent the fraction of the calibration reference value required for a gesture.
@@ -291,6 +307,14 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
             return
         }
 
+        // Tracking recovery: first good frame after a loss cycle.
+        if isTrackingLost {
+            isTrackingLost = false
+            DispatchQueue.main.async { [weak self] in
+                self?.onTrackingRestored?()
+            }
+        }
+
         addSnapshot(snapshot)
     }
 
@@ -300,12 +324,14 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
         pendingCount    = 0
         freezeStartTime = nil
         resetLeanCalibration()
+        isTrackingLost  = true
         print("🕹️ [MotionInterpreter] Tracking lost — full state reset")
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.lastConfirmedEvent = .none
             self.confirmedEvent     = .none
             self.currentEvent       = .none
+            self.onTrackingLost?()
         }
     }
 
