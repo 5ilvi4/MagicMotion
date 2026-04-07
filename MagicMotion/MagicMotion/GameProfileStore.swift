@@ -143,6 +143,10 @@ final class GameProfileStore {
     // They are the last resort — prefer keeping JSON files up to date.
 
     private func hardcodedFallback(for gameID: GameID) -> GameProfile? {
+        // recognizerConfig values are sensitivity multipliers (new semantics).
+        // effectiveThreshold = sensitivity × calibrationReference
+        //   e.g. bodyLean sensitivity 0.40 × shoulderWidth 0.20 = threshold 0.08
+        // See MotionInterpreter.apply(profile:) for the full derivation.
         switch gameID {
         case .subwaySurfers:
             return GameProfile(
@@ -153,11 +157,17 @@ final class GameProfileStore {
                     "leanRight": .rightArrow,
                     "jump":      .spacebar,
                     "squat":     .downArrow
+                ],
+                enabledRecognizers: [.bodyLean, .bodyJump, .bodySquat, .handSwipe],
+                recognizerConfig: [
+                    "bodyLean":  ["sensitivity": 0.40],
+                    "bodyJump":  ["sensitivity": 0.55],
+                    "bodySquat": ["sensitivity": 0.55]
                 ]
             )
         case .templeRun:
             // Temple Run: player raises hands to jump rather than physically jumping.
-            // "jump" (hip-rise) is intentionally unmapped here.
+            // Physical hip-rise jump is intentionally omitted from enabledRecognizers.
             return GameProfile(
                 gameID: .templeRun,
                 displayName: "Temple Run",
@@ -166,12 +176,17 @@ final class GameProfileStore {
                     "leanRight": .rightArrow,
                     "handsUp":   .spacebar,
                     "squat":     .downArrow
+                ],
+                enabledRecognizers: [.bodyLean, .bodyHandsUp, .bodySquat],
+                recognizerConfig: [
+                    "bodyLean":    ["sensitivity": 0.40],
+                    "bodyHandsUp": ["sensitivity": 0.30],
+                    "bodySquat":   ["sensitivity": 0.55]
                 ]
             )
         case .crossyRoad:
             // Crossy Road: hop forward with hands-up, step back with hands-down.
-            // Physical jump and squat are not used — road-crossing is arm-gesture driven.
-            // First profile to use "handsDown", exercising the full MotionEventKey vocabulary.
+            // Physical jump and squat are unused — road-crossing is arm-gesture driven.
             return GameProfile(
                 gameID: .crossyRoad,
                 displayName: "Crossy Road",
@@ -180,6 +195,12 @@ final class GameProfileStore {
                     "leanRight": .rightArrow,
                     "handsUp":   .spacebar,
                     "handsDown": .downArrow
+                ],
+                enabledRecognizers: [.bodyLean, .bodyHandsUp, .bodyHandsDown],
+                recognizerConfig: [
+                    "bodyLean":      ["sensitivity": 0.40],
+                    "bodyHandsUp":   ["sensitivity": 0.30],
+                    "bodyHandsDown": ["sensitivity": 0.25]
                 ]
             )
         }

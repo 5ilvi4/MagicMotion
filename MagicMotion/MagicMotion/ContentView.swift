@@ -41,6 +41,9 @@ struct ContentView: View {
     // MARK: - Game Profile
     @StateObject private var profileManager = GameProfileManager()
 
+    // MARK: - Body Calibration
+    @StateObject private var calibrationEngine = CalibrationEngine()
+
     // MARK: - Layer 6: Diagnostics
     @State private var didSetupLayers = false
 
@@ -64,9 +67,22 @@ struct ContentView: View {
             } else {
                 fallbackLayout   // iPad: camera feed + game embedded
             }
+
+            // Body calibration overlay — covers UI during active calibration phases.
+            // CalibrationEngine auto-dismisses after completion / failure.
+            if calibrationEngine.isActive {
+                CalibrationOverlayView(phase: calibrationEngine.phase)
+            }
         }
         .onAppear { setupLayers() }
         .onDisappear { teardownLayers() }
+        .onChange(of: calibrationEngine.phase) { phase in
+            // When CalibrationEngine finishes, push the personalized calibration
+            // into MotionInterpreter so body-relative thresholds take effect immediately.
+            if case .complete(let cal) = phase {
+                interpreter.applyCalibration(cal)
+            }
+        }
     }
 
     // MARK: - Layouts
@@ -337,8 +353,8 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
 
-                Button(action: { interpreter.resetLeanCalibration() }) {
-                    Label("Recalibrate Lean", systemImage: "figure.stand")
+                Button(action: { calibrationEngine.startCalibration() }) {
+                    Label("Calibrate Body", systemImage: "figure.stand")
                         .font(.caption.bold())
                 }
                 .buttonStyle(.bordered)
@@ -618,10 +634,13 @@ struct ContentView: View {
             coordinator?.receive(bodyEvent: event)
         }
 
-        // Wire logger: every snapshot goes to MotionSessionLogger
-        motionEngine.onPoseSnapshot = { [weak interpreter] snapshot in
-            guard let event = interpreter?.currentEvent, event != .none else { return }
-            MotionSessionLogger.shared.log(event: event, snapshot: snapshot)
+        // Wire logger and calibration feed.
+        // CalibrationEngine.feed() is a no-op when idle so this is always safe.
+        motionEngine.onPoseSnapshot = { [weak interpreter, weak calibrationEngine] snapshot in
+            calibrationEngine?.feed(snapshot: snapshot)
+            if let event = interpreter?.currentEvent, event != .none {
+                MotionSessionLogger.shared.log(event: event, snapshot: snapshot)
+            }
         }
 
         // Layer 1: Start frame source
