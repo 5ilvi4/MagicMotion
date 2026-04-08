@@ -136,8 +136,12 @@ struct ContentView: View {
             controllerSession.prepare(gameProfile: profile, calibration: cal)
         }
 
-        // Safety zone → release D-pad + pause controller
+        // Safety zone → release D-pad + pause controller (only when active)
+        // Guard required: onSafetyZoneViolation fires every MediaPipe frame while
+        // nose.z < threshold (~30×/s). Without the guard, sendNeutral() would write
+        // 0x00 to BLE continuously while already paused.
         interpreter.onSafetyZoneViolation = { [weak controllerSession, weak band] in
+            guard case .active = controllerSession?.state else { return }
             band?.sendNeutral()
             controllerSession?.pause(reason: .safetyZoneViolation)
         }

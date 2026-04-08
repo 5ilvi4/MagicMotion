@@ -366,7 +366,11 @@ struct ControllerModeView: View {
         guard let profile = profileManager.activeProfile else { return }
         controllerSession.activate()
         gameLauncher.launch(game: profile.gameID)
-        BackgroundTaskManager.shared.beginBackgroundProcessing()
+        // Note: BackgroundTaskManager.beginBackgroundProcessing() is NOT called here.
+        // AppDelegate.applicationDidEnterBackground handles background task registration
+        // when the app actually backgrounds (game comes to foreground).
+        // Calling it here would fire onDidEnterBackground immediately — before the game
+        // opens — causing the session to pause the moment the user taps Start.
     }
 
     /// Stop the session, close the game, and immediately re-prepare so the

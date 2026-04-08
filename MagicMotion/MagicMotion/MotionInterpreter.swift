@@ -187,7 +187,10 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
     // MARK: - Cooldown
 
     private var lastEventTime: Date = .distantPast
-    private let cooldown: TimeInterval = 0.5
+    /// Minimum seconds between any two confirmed body gestures.
+    /// Set from profile via recognizerConfig["global"]["cooldown"] in apply(profile:).
+    /// Default 0.5 s works for casual play; reduce toward 0.3 s for fast-paced games.
+    private var cooldown: TimeInterval = 0.5
 
     // MARK: - Transition logging (separate from auto-clearing currentEvent)
 
@@ -260,6 +263,10 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
         if let v = profile.config(for: .bodySquat)["sensitivity"]     { squatSensitivity     = Float(v) }
         if let v = profile.config(for: .bodyHandsUp)["sensitivity"]   { handsUpSensitivity   = Float(v) }
         if let v = profile.config(for: .bodyHandsDown)["sensitivity"] { handsDownSensitivity = Float(v) }
+
+        // Global inter-gesture cooldown. Key: recognizerConfig["global"]["cooldown"].
+        // Example profile JSON: "recognizerConfig": { "global": { "cooldown": 0.35 } }
+        if let v = profile.recognizerConfig?["global"]?["cooldown"] { cooldown = v }
 
         // Reset adaptive deltas — game switch restores profile defaults immediately.
         sensitivityMultipliers = [:]
