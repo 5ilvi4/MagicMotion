@@ -6,5 +6,11 @@
     "leanRight": 2,
     "handsUp":   3,
     "squat":     4
+  },
+  "enabledRecognizers": ["bodyLean", "bodyHandsUp", "bodySquat"],
+  "recognizerConfig": {
+    "bodyLean":    { "sensitivity": 0.40 },
+    "bodyHandsUp": { "sensitivity": 0.30 },
+    "bodySquat":   { "sensitivity": 0.55 }
   }
 }

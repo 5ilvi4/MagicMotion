@@ -197,8 +197,12 @@ struct ContentView: View {
         }
 
         // Intent path: coordinator → ControllerSession + band
+        // BLE send is gated on session being active. Camera and pose detection keep
+        // running while paused — confirmed gestures must not produce game inputs
+        // while the pause banner is visible or the session has ended.
         coordinator.onIntent = { [weak controllerSession, weak band, weak profileManager] intent in
             controllerSession?.handle(intent: intent)
+            guard case .active = controllerSession?.state else { return }
             if let command = profileManager?.mapIntent(intent) {
                 band?.send(command: command)
                 controllerSession?.recordMappedCommand(command)

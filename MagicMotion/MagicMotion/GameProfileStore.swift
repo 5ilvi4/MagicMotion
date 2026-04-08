@@ -139,7 +139,7 @@ final class GameProfileStore {
     }
 
     // MARK: - Hardcoded Fallbacks
-    // These mirror band-firmware/Config.h byte values.
+    // These mirror the command byte values in M5Gamepad/M5Gamepad.ino.
     // They are the last resort — prefer keeping JSON files up to date.
 
     private func hardcodedFallback(for gameID: GameID) -> GameProfile? {

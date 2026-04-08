@@ -266,7 +266,9 @@ class MotionInterpreter: ObservableObject, MotionEngineDelegate {
 
         // Global inter-gesture cooldown. Key: recognizerConfig["global"]["cooldown"].
         // Example profile JSON: "recognizerConfig": { "global": { "cooldown": 0.35 } }
-        if let v = profile.recognizerConfig?["global"]?["cooldown"] { cooldown = v }
+        // Always reset to default first so switching away from a fast-play profile
+        // doesn't leave the stale (lower) cooldown in effect.
+        cooldown = profile.recognizerConfig?["global"]?["cooldown"] ?? 0.5
 
         // Reset adaptive deltas — game switch restores profile defaults immediately.
         sensitivityMultipliers = [:]

@@ -6,5 +6,11 @@
     "leanRight": 2,
     "jump":      3,
     "squat":     4
+  },
+  "enabledRecognizers": ["bodyLean", "bodyJump", "bodySquat", "handSwipe"],
+  "recognizerConfig": {
+    "bodyLean":  { "sensitivity": 0.40 },
+    "bodyJump":  { "sensitivity": 0.55 },
+    "bodySquat": { "sensitivity": 0.55 }
   }
 }
