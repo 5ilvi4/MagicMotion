@@ -57,21 +57,31 @@ enum GameID: String, Codable, CaseIterable {
 }
 
 // MARK: - Game Command
-// Maps 1:1 to the firmware HID byte values defined in band-firmware/Config.h.
-// The byte → key mapping is fixed by firmware; these names document what each byte does.
+//
+// Byte values written to the M5StickC Plus2 CMD characteristic.
+// The M5 firmware maps each byte to a BLE HID D-pad (hat switch) direction:
+//   0x01 → HAT_LEFT   (lane left)
+//   0x02 → HAT_RIGHT  (lane right)
+//   0x03 → HAT_UP     (jump)
+//   0x04 → HAT_DOWN   (slide / roll)
+//   0x00 → HAT_NEUTRAL (release — sent automatically by BandBLEManager after hold)
+//
+// Case names use their in-game action semantics, not their legacy keyboard names.
+// The underlying raw values are stable and must not change — the firmware is keyed on them.
 
 enum GameCommand: UInt8, Codable, CaseIterable {
-    case leftArrow  = 0x01
-    case rightArrow = 0x02
-    case spacebar   = 0x03
-    case downArrow  = 0x04
+    case leftArrow  = 0x01   // D-pad left  — move left / lane change left
+    case rightArrow = 0x02   // D-pad right — move right / lane change right
+    case spacebar   = 0x03   // D-pad up    — jump (legacy name kept for JSON compatibility)
+    case downArrow  = 0x04   // D-pad down  — slide / roll / crouch
 
+    /// Short label used in the debug BLE test panel.
     var displayName: String {
         switch self {
         case .leftArrow:  return "LEFT ←"
         case .rightArrow: return "RIGHT →"
-        case .spacebar:   return "SPACE"
-        case .downArrow:  return "DOWN ↓"
+        case .spacebar:   return "JUMP ↑"
+        case .downArrow:  return "SLIDE ↓"
         }
     }
 
@@ -80,7 +90,7 @@ enum GameCommand: UInt8, Codable, CaseIterable {
         switch self {
         case .leftArrow:  return "Move Left"
         case .rightArrow: return "Move Right"
-        case .spacebar:   return "Jump / Fly"
+        case .spacebar:   return "Jump"
         case .downArrow:  return "Slide / Roll"
         }
     }

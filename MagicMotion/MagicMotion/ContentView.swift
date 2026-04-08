@@ -136,14 +136,16 @@ struct ContentView: View {
             controllerSession.prepare(gameProfile: profile, calibration: cal)
         }
 
-        // Safety zone → pause controller
-        interpreter.onSafetyZoneViolation = { [weak controllerSession] in
+        // Safety zone → release D-pad + pause controller
+        interpreter.onSafetyZoneViolation = { [weak controllerSession, weak band] in
+            band?.sendNeutral()
             controllerSession?.pause(reason: .safetyZoneViolation)
         }
 
-        // Tracking loss → pause controller when active
-        interpreter.onTrackingLost = { [weak controllerSession] in
+        // Tracking loss → release D-pad + pause controller when active
+        interpreter.onTrackingLost = { [weak controllerSession, weak band] in
             guard case .active = controllerSession?.state else { return }
+            band?.sendNeutral()
             controllerSession?.pause(reason: .trackingLost)
         }
 
@@ -155,9 +157,10 @@ struct ContentView: View {
             controllerSession?.resume()
         }
 
-        // App backgrounding → pause controller when active
-        BackgroundTaskManager.shared.onDidEnterBackground = { [weak controllerSession] in
+        // App backgrounding → pause controller when active + release D-pad
+        BackgroundTaskManager.shared.onDidEnterBackground = { [weak controllerSession, weak band] in
             guard case .active = controllerSession?.state else { return }
+            band?.sendNeutral()          // release D-pad before pausing
             controllerSession?.pause(reason: .appBackgrounded)
         }
 
@@ -183,8 +186,9 @@ struct ContentView: View {
             // can tap Resume or Stop explicitly.
         }
 
-        // Session reports → persist when a session ends with real activity
-        controllerSession.onSessionEnded = { [weak reportStore] report in
+        // Session end → release D-pad + persist report
+        controllerSession.onSessionEnded = { [weak reportStore, weak band] report in
+            band?.sendNeutral()
             reportStore?.save(report)
         }
 
