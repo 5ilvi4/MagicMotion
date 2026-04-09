@@ -130,7 +130,7 @@ enum MotionEventKey: String, Codable, CaseIterable {
 
 // MARK: - Game Profile
 
-struct GameProfile: Codable {
+struct GameProfile: Codable, Equatable {
     let gameID: GameID
     let displayName: String
     /// Keys are MotionEventKey.rawValue strings; values are GameCommand raw bytes.
