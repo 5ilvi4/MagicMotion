@@ -1,11 +1,8 @@
 // ReportsView.swift
 // MagicMotion
 //
-// The "Reports" tab. Shows persisted SessionReports from SessionReportStore,
-// most recent first. Falls back to an empty state when no sessions exist yet.
-//
-// Scope: lightweight first pass — the live in-session data from ControllerSession
-// is also shown at the top when a session is active or recently ended.
+// The "Reports" tab. Shows a metrics dashboard (ReportDashboard) and persisted
+// SessionReports from SessionReportStore, most recent first.
 
 import SwiftUI
 
@@ -13,6 +10,7 @@ struct ReportsView: View {
 
     @ObservedObject var controllerSession: ControllerSession
     @ObservedObject var reportStore: SessionReportStore
+    @ObservedObject var dashboard: ReportDashboard
 
     var body: some View {
         NavigationView {
@@ -29,6 +27,7 @@ struct ReportsView: View {
                     ToolbarItem(placement: .navigationBarTrailing) {
                         Button(role: .destructive) {
                             reportStore.clearAll()
+                            dashboard.refresh(from: [])
                         } label: {
                             Image(systemName: "trash")
                         }
@@ -37,13 +36,25 @@ struct ReportsView: View {
             }
         }
         .navigationViewStyle(.stack)
+        .onReceive(reportStore.$reports) { reports in
+            dashboard.refresh(from: reports)
+        }
     }
 
     // MARK: - Report list
 
     private var reportList: some View {
         List {
-            // Live session card — shown while a session is active or recently ended
+            // Metrics dashboard — shown once there is any recorded data
+            if !reportStore.reports.isEmpty {
+                Section {
+                    metricsGrid
+                } header: {
+                    Label("Progress", systemImage: "chart.bar.fill")
+                }
+            }
+
+            // Live session card — shown while a session is active or has activity
             if hasLiveActivity {
                 Section {
                     liveSessionCard
@@ -64,6 +75,60 @@ struct ReportsView: View {
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    // MARK: - Metrics grid
+
+    private var metricsGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            metricCard(descriptor: .sessionDuration,    state: dashboard.sessionDuration)
+            metricCard(descriptor: .weeklyStreak,       state: dashboard.weeklyStreak)
+            metricCard(descriptor: .activeMinutes,      state: dashboard.activeMinutes)
+            metricCard(descriptor: .grossMotorCount,    state: dashboard.grossMotorCount)
+            metricCard(descriptor: .handUsageCount,     state: dashboard.handUsageCount)
+            metricCard(descriptor: .gestureSuccessRate, state: dashboard.gestureSuccessRate)
+            metricCard(descriptor: .hesitationScore,    state: dashboard.hesitationScore)
+            metricCard(descriptor: .persistenceScore,   state: dashboard.persistenceScore)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func metricCard(descriptor: MetricDescriptor, state: MetricCardState) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: descriptor.symbolName)
+                    .font(.caption)
+                    .foregroundColor(state.accentColor)
+                Text(descriptor.title)
+                    .font(.caption.bold())
+                    .foregroundColor(.primary)
+                Spacer()
+                if let badge = state.badgeSymbol {
+                    Image(systemName: badge)
+                        .font(.caption2)
+                        .foregroundColor(state.accentColor)
+                }
+            }
+
+            Text(state.primaryText)
+                .font(.title2.bold())
+                .foregroundColor(state.primaryText == "–" ? .secondary : .primary)
+
+            if !state.subtitleText.isEmpty {
+                Text(state.subtitleText)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            } else {
+                Text(descriptor.subtitle)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemGroupedBackground))
+        .cornerRadius(10)
     }
 
     // MARK: - Live session card
@@ -124,17 +189,16 @@ struct ReportsView: View {
             }
 
             HStack(spacing: 16) {
-                statChip(icon: "clock",
-                         value: report.formattedDuration)
-                statChip(icon: "bolt",
-                         value: "\(report.intentCount) intents")
-                statChip(icon: "antenna.radiowaves.left.and.right",
-                         value: "\(report.commandCount) sent")
+                statChip(icon: "clock",           value: report.formattedDuration)
+                statChip(icon: "bolt",            value: "\(report.commandCount) actions")
+                if report.trackingLostCount > 0 {
+                    statChip(icon: "eye.slash",   value: "\(report.trackingLostCount)×")
+                }
             }
 
             HStack(spacing: 8) {
-                if let last = report.lastCommand {
-                    Label(last, systemImage: "arrow.right.circle")
+                if let rate = report.gestureSuccessRate {
+                    Label("\(Int(rate * 100))% success", systemImage: "checkmark.circle")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -148,6 +212,14 @@ struct ReportsView: View {
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
+            }
+
+            // Validity flags
+            let flags = report.validityFlags
+            if !flags.isEmpty {
+                Text(flags.joined(separator: " · "))
+                    .font(.caption2)
+                    .foregroundColor(.orange)
             }
         }
         .padding(.vertical, 4)

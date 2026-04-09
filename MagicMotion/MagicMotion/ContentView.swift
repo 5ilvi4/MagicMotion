@@ -47,6 +47,7 @@ struct ContentView: View {
     @StateObject private var profileManager = GameProfileManager()
     @StateObject private var calibrationEngine = CalibrationEngine()
     @StateObject private var reportStore    = SessionReportStore()
+    @StateObject private var reportDashboard = ReportDashboard()
 
     // MARK: - Wiring guard
     @State private var didSetupLayers = false
@@ -85,7 +86,7 @@ struct ContentView: View {
             )
             .tabItem { Label("Setup", systemImage: "slider.horizontal.3") }
 
-            ReportsView(controllerSession: controllerSession, reportStore: reportStore)
+            ReportsView(controllerSession: controllerSession, reportStore: reportStore, dashboard: reportDashboard)
                 .tabItem { Label("Reports", systemImage: "chart.bar.fill") }
         }
         .onAppear  { setupLayers() }
@@ -136,20 +137,28 @@ struct ContentView: View {
             controllerSession.prepare(gameProfile: profile, calibration: cal)
         }
 
-        // Safety zone → release D-pad + pause controller (only when active)
+        // Band disconnect / reconnect → record in session
+        band.onDisconnect = { [weak controllerSession] in
+            controllerSession?.recordBandDisconnect()
+        }
+        // band.onReconnect is available for future use (e.g. toast notification).
+
+        // Safety zone → release D-pad + count + pause controller (only when active)
         // Guard required: onSafetyZoneViolation fires every MediaPipe frame while
         // nose.z < threshold (~30×/s). Without the guard, sendNeutral() would write
         // 0x00 to BLE continuously while already paused.
         interpreter.onSafetyZoneViolation = { [weak controllerSession, weak band] in
             guard case .active = controllerSession?.state else { return }
             band?.sendNeutral()
+            controllerSession?.recordSafetyZoneViolation()
             controllerSession?.pause(reason: .safetyZoneViolation)
         }
 
-        // Tracking loss → release D-pad + pause controller when active
+        // Tracking loss → release D-pad + count + pause controller when active
         interpreter.onTrackingLost = { [weak controllerSession, weak band] in
             guard case .active = controllerSession?.state else { return }
             band?.sendNeutral()
+            controllerSession?.recordTrackingLost()
             controllerSession?.pause(reason: .trackingLost)
         }
 
@@ -190,10 +199,13 @@ struct ContentView: View {
             // can tap Resume or Stop explicitly.
         }
 
-        // Session end → release D-pad + persist report
-        controllerSession.onSessionEnded = { [weak reportStore, weak band] report in
+        // Session end → release D-pad + persist report + refresh dashboard
+        controllerSession.onSessionEnded = { [weak reportStore, weak band, weak reportDashboard] report in
             band?.sendNeutral()
             reportStore?.save(report)
+            if let store = reportStore {
+                reportDashboard?.refresh(from: store.reports)
+            }
         }
 
         // Intent path: coordinator → ControllerSession + band
@@ -252,6 +264,9 @@ struct ContentView: View {
                 cameraManager: frameSource
             )
         }
+
+        // Seed dashboard from any previously persisted reports.
+        reportDashboard.refresh(from: reportStore.reports)
 
         print("✅ All layers initialized and wired")
     }

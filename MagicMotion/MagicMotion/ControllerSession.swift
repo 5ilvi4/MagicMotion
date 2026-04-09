@@ -2,28 +2,26 @@
 // MagicMotion
 //
 // Runtime center for MagicMotion Home controller mode.
-// This replaces GameSession as the primary session object for active play.
-//
-// Responsibilities:
-//   - Own the ControllerSessionState state machine
-//   - Hold the current ActiveControlProfile (game + child calibration combination)
-//   - Track session-level activity: resolved intents, mapped commands, elapsed time
+// Owns the ControllerSessionState state machine, the current ActiveControlProfile,
+// and all session-level activity counters used to produce the SessionReport.
 //
 // NOT responsible for:
-//   - Game loop simulation (no CADisplayLink, no obstacle/coin spawning)
+//   - Game loop simulation
 //   - Motion event interpretation (MotionInterpreter owns that)
 //   - BLE command dispatch (BandBLEManager owns that)
-//   - Body calibration execution (CalibrationEngine owns that)
+//   - Body calibration (CalibrationEngine owns that)
 //   - Reading/writing UserDefaults (callers supply explicit GameProfile + BodyCalibration)
 //
 // Wiring (done in ContentView.setupLayers):
-//   CalibrationEngine .complete(cal)   → controllerSession.prepare(gameProfile:calibration:)
-//   profileManager.onProfileChanged    → controllerSession.prepare(gameProfile:calibration:)
-//   coordinator.onIntent               → controllerSession.handle(intent:)
-//                                      → controllerSession.recordMappedCommand(_:)  (after BLE send)
-//   interpreter.onSafetyZoneViolation  → controllerSession.pause(reason: .safetyZoneViolation)
-//   gameLauncher "Play Game"           → controllerSession.activate()
-//   gameLauncher "Return from game"    → controllerSession.end()
+//   CalibrationEngine .complete(cal)   → prepare(gameProfile:calibration:)
+//   profileManager.onProfileChanged    → prepare(gameProfile:calibration:)
+//   coordinator.onIntent               → handle(intent:)
+//                                      → recordMappedCommand(_:)  (after BLE send)
+//   interpreter.onSafetyZoneViolation  → recordSafetyZoneViolation() then pause(.safetyZoneViolation)
+//   interpreter.onTrackingLost         → recordTrackingLost() then pause(.trackingLost)
+//   band.onDisconnect                  → recordBandDisconnect()
+//   gameLauncher "Play Game"           → activate()
+//   gameLauncher "Return from game"    → end()
 //   onSessionEnded                     → SessionReportStore.save(_:)
 
 import Foundation
@@ -61,7 +59,6 @@ final class ControllerSession: ObservableObject {
 
     /// Assemble an ActiveControlProfile from explicit components and move to
     /// .ready (personalized calibration) or .needsCalibration (uncalibrated defaults).
-    /// Call whenever the game selection or body calibration changes.
     func prepare(gameProfile: GameProfile, calibration: BodyCalibration) {
         let profile = ActiveControlProfile(gameProfile: gameProfile, calibration: calibration)
         activeProfile = profile
@@ -73,11 +70,7 @@ final class ControllerSession: ObservableObject {
     /// Begin the active controller session. Valid only from .ready.
     func activate() {
         guard case .ready = state else { return }
-        intentCount     = 0
-        commandCount    = 0
-        lastIntent      = .none
-        lastMappedCommand = nil
-        sessionDuration = 0
+        resetCounters()
         sessionStartDate = Date()
         startDurationTimer()
         transition(to: .active)
@@ -88,6 +81,7 @@ final class ControllerSession: ObservableObject {
     func pause(reason: ControllerPauseReason) {
         guard case .active = state else { return }
         stopDurationTimer()
+        pauseCount += 1
         transition(to: .paused(reason: reason))
         print("🕹️ [ControllerSession] Paused — reason: \(reason)")
     }
@@ -111,32 +105,35 @@ final class ControllerSession: ObservableObject {
         // or at least one command sent.
         if sessionDuration > 1.0 || commandCount > 0 {
             let report = SessionReport(
-                id:             UUID(),
-                date:           sessionStartDate ?? Date(),
-                gameName:       activeProfile?.displayName ?? "Unknown",
-                duration:       sessionDuration,
-                intentCount:    intentCount,
-                commandCount:   commandCount,
-                lastCommand:    lastMappedCommand?.displayName,
-                wasPersonalized: activeProfile?.isPersonalized ?? false
+                id:                      UUID(),
+                date:                    sessionStartDate ?? Date(),
+                gameName:                activeProfile?.displayName ?? "Unknown",
+                gameID:                  activeProfile?.gameID.rawValue,
+                duration:                sessionDuration,
+                intentCount:             intentCount,
+                commandCount:            commandCount,
+                lastCommand:             lastMappedCommand?.displayName,
+                wasPersonalized:         activeProfile?.isPersonalized ?? false,
+                intentCounts:            intentTypeCounts,
+                commandCounts:           commandTypeCounts,
+                trackingLostCount:       trackingLostCount,
+                safetyZoneViolationCount: safetyZoneViolationCount,
+                bandDisconnectCount:     bandDisconnectCount,
+                pauseCount:              pauseCount
             )
             onSessionEnded?(report)
         }
 
         transition(to: .ended)
-        print("🕹️ [ControllerSession] Ended — intents: \(intentCount) commands: \(commandCount) duration: \(Int(sessionDuration))s")
+        print("🕹️ [ControllerSession] Ended — intents:\(intentCount) cmds:\(commandCount) dur:\(Int(sessionDuration))s trackingLost:\(trackingLostCount) safetyZone:\(safetyZoneViolationCount) pauses:\(pauseCount)")
     }
 
     /// Reset to idle, clearing all session data. Safe to call from any state.
     func reset() {
         stopDurationTimer()
-        sessionStartDate  = nil
-        intentCount       = 0
-        commandCount      = 0
-        lastIntent        = .none
-        lastMappedCommand = nil
-        sessionDuration   = 0
-        activeProfile     = nil
+        sessionStartDate = nil
+        resetCounters()
+        activeProfile = nil
         transition(to: .idle)
         print("🕹️ [ControllerSession] Reset")
     }
@@ -144,11 +141,11 @@ final class ControllerSession: ObservableObject {
     // MARK: - Activity recording
 
     /// Record a raw resolved intent from InputCoordinator. No-op when not active.
-    /// Call this before mapping to a GameCommand so every resolved motion is captured.
     func handle(intent: AppIntent) {
         guard case .active = state else { return }
         lastIntent  = intent
         intentCount += 1
+        intentTypeCounts[intent.displayName, default: 0] += 1
     }
 
     /// Record that a GameCommand was successfully mapped and sent to the band.
@@ -157,12 +154,56 @@ final class ControllerSession: ObservableObject {
         guard case .active = state else { return }
         lastMappedCommand = command
         commandCount     += 1
+        commandTypeCounts[command.displayName, default: 0] += 1
     }
 
-    // MARK: - Private
+    // MARK: - Lifecycle event recording
+    // These must be called from ContentView.setupLayers() BEFORE the paired
+    // pause() / state transition so the count is always included in the report.
+
+    /// Increment the tracking-loss counter. Call immediately before pause(.trackingLost).
+    func recordTrackingLost() {
+        guard case .active = state else { return }
+        trackingLostCount += 1
+    }
+
+    /// Increment the safety-zone violation counter. Call immediately before pause(.safetyZoneViolation).
+    func recordSafetyZoneViolation() {
+        guard case .active = state else { return }
+        safetyZoneViolationCount += 1
+    }
+
+    /// Increment the band-disconnect counter. Called by ContentView when BandBLEManager fires onDisconnect.
+    /// Not gated on session state — disconnects are meaningful regardless of whether the session is active.
+    func recordBandDisconnect() {
+        bandDisconnectCount += 1
+    }
+
+    // MARK: - Private counters
+
+    private var intentTypeCounts:       [String: Int] = [:]
+    private var commandTypeCounts:      [String: Int] = [:]
+    private var trackingLostCount:      Int = 0
+    private var safetyZoneViolationCount: Int = 0
+    private var bandDisconnectCount:    Int = 0
+    private var pauseCount:             Int = 0
 
     private var sessionStartDate: Date? = nil
     private var durationTimer: Timer?   = nil
+
+    private func resetCounters() {
+        intentCount            = 0
+        commandCount           = 0
+        lastIntent             = .none
+        lastMappedCommand      = nil
+        sessionDuration        = 0
+        intentTypeCounts       = [:]
+        commandTypeCounts      = [:]
+        trackingLostCount      = 0
+        safetyZoneViolationCount = 0
+        bandDisconnectCount    = 0
+        pauseCount             = 0
+    }
 
     private func startDurationTimer() {
         durationTimer?.invalidate()

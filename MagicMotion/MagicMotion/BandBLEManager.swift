@@ -79,6 +79,15 @@ final class BandBLEManager: NSObject, ObservableObject {
     /// Last GameCommand successfully handed to the BLE write path. Nil until first send.
     @Published private(set) var lastSentCommand: GameCommand?
 
+    // MARK: - Connection event callbacks (fired on MainActor)
+
+    /// Called when the CMD characteristic goes offline (disconnect or BT off).
+    /// Wire to ControllerSession.recordBandDisconnect() in ContentView.setupLayers().
+    var onDisconnect: (() -> Void)?
+
+    /// Called when the CMD characteristic is fully ready again after a reconnect.
+    var onReconnect: (() -> Void)?
+
     // MARK: - Configuration
 
     /// How long (seconds) a command D-pad direction is held before the neutral
@@ -202,8 +211,10 @@ final class BandBLEManager: NSObject, ObservableObject {
 
     nonisolated private func setConnected(_ connected: Bool) {
         Task { @MainActor [weak self] in
-            self?.isConnected = connected
-            self?.statusText  = connected ? "Band ✓" : "Band: Disconnected"
+            guard let self else { return }
+            self.isConnected = connected
+            self.statusText  = connected ? "Band ✓" : "Band: Disconnected"
+            if connected { self.onReconnect?() } else { self.onDisconnect?() }
         }
     }
 
