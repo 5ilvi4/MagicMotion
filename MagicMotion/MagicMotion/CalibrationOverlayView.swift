@@ -1,113 +1,62 @@
 // CalibrationOverlayView.swift
 // MagicMotion
 //
-// Child-friendly overlay displayed during the staged body calibration flow.
-// Receives a CalibrationPhase value and renders the appropriate instruction,
-// countdown, and progress indicator.
+// Child-facing calibration shell.
 //
-// ContentView shows this view whenever calibrationEngine.isActive is true.
-// CalibrationEngine auto-dismisses after completion / failure, so no
-// dismiss button is needed here.
+// Layout (top → bottom):
+//   ① CalibrationProgressView   — step dots + countdown ring (.ultraThinMaterial)
+//   ② [transparent gap]         — camera visible here + CalibrationFitGuideView ghost
+//   ③ CalibrationPhaseInstructionView — instruction card (.regularMaterial)
+//
+// The background is a light dim (not solid black) so the camera or app content
+// remains visible through the middle layer. The ghost guide and target zone
+// overlay the camera feed, giving the child real-time framing feedback.
+//
+// Call sites: SetupView, ControllerModeView
+// Inputs: phase + framingGuidance — both from CalibrationEngine
 
 import SwiftUI
 
 struct CalibrationOverlayView: View {
 
     let phase: CalibrationPhase
+    let framingGuidance: FramingGuidance
 
     var body: some View {
-        ZStack {
-            // Semi-transparent backdrop
-            Color.black.opacity(0.80)
+        ZStack(alignment: .top) {
+
+            // ── Dim layer — transparent enough to see camera through ─────
+            Color.black.opacity(0.45)
                 .ignoresSafeArea()
 
-            VStack(spacing: 28) {
+            VStack(spacing: 0) {
 
-                // ── Progress dots (1 of 3 / 2 of 3 / 3 of 3) ──────────────
-                if phase.phaseIndex > 0 {
-                    HStack(spacing: 12) {
-                        ForEach(1...3, id: \.self) { i in
-                            Circle()
-                                .fill(i <= phase.phaseIndex ? Color.yellow : Color.white.opacity(0.25))
-                                .frame(width: 14, height: 14)
-                                .animation(.easeInOut, value: phase.phaseIndex)
-                        }
-                    }
-                }
+                // ── ① Progress bar ───────────────────────────────────────
+                CalibrationProgressView(phase: phase)
+                    .padding(.top, 20)
+                    .padding(.horizontal, 20)
 
-                // ── Phase icon ─────────────────────────────────────────────
-                Image(systemName: phaseIcon)
-                    .font(.system(size: 80))
-                    .foregroundColor(phaseColor)
-                    .padding(.bottom, 4)
+                Spacer()
 
-                // ── Phase name ─────────────────────────────────────────────
-                Text(phase.displayName)
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
+                // ── ② Ghost fit guide (transparent — camera shows here) ──
+                CalibrationFitGuideView(
+                    framingGuidance: framingGuidance,
+                    phase: phase
+                )
 
-                // ── Child-friendly instruction ─────────────────────────────
-                Text(phase.instruction)
-                    .font(.system(size: 24, weight: .semibold, design: .rounded))
-                    .foregroundColor(.yellow)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                Spacer()
 
-                // ── Countdown circle ───────────────────────────────────────
-                if let seconds = phase.secondsRemaining {
-                    ZStack {
-                        Circle()
-                            .stroke(Color.white.opacity(0.2), lineWidth: 7)
-                            .frame(width: 90, height: 90)
-                        Text("\(seconds)")
-                            .font(.system(size: 46, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                    }
-                    .animation(.easeInOut, value: seconds)
-                }
-
-                // ── Completion badge ───────────────────────────────────────
-                if case .complete = phase {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 56))
-                        .foregroundColor(.green)
-                }
-
-                // ── Failure state ──────────────────────────────────────────
-                if case .failed = phase {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 48))
-                        .foregroundColor(.orange)
-                    Text("Dismissing in a moment…")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.6))
-                }
+                // ── ③ Phase instruction card ─────────────────────────────
+                CalibrationPhaseInstructionView(
+                    phase: phase,
+                    framingGuidance: framingGuidance
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 36)
             }
-            .padding(40)
         }
         .transition(.opacity)
         .animation(.easeInOut(duration: 0.25), value: phase)
-    }
-
-    // MARK: - Helpers
-
-    private var phaseIcon: String {
-        switch phase {
-        case .neutralStance: return "figure.stand"
-        case .jump:          return "figure.jumprope"
-        case .squat:         return "figure.flexibility"
-        case .complete:      return "star.fill"
-        case .failed:        return "exclamationmark.triangle"
-        default:             return "figure.stand"
-        }
-    }
-
-    private var phaseColor: Color {
-        switch phase {
-        case .complete: return .green
-        case .failed:   return .orange
-        default:        return .yellow
-        }
     }
 }
 
@@ -117,13 +66,41 @@ struct CalibrationOverlayView: View {
 struct CalibrationOverlayView_Previews: PreviewProvider {
     static var previews: some View {
         Group {
-            CalibrationOverlayView(phase: .neutralStance(secondsRemaining: 2))
-                .previewDisplayName("Neutral stance")
-            CalibrationOverlayView(phase: .jump(secondsRemaining: 1))
-                .previewDisplayName("Jump")
-            CalibrationOverlayView(phase: .complete(.uncalibrated))
-                .previewDisplayName("Complete")
+            CalibrationOverlayView(
+                phase: .neutralStance(secondsRemaining: 3),
+                framingGuidance: .tooLeft
+            )
+            .previewDisplayName("Neutral — framing off")
+
+            CalibrationOverlayView(
+                phase: .jump(secondsRemaining: 2),
+                framingGuidance: .good
+            )
+            .previewDisplayName("Jump — ready")
+
+            CalibrationOverlayView(
+                phase: .squat(secondsRemaining: 1),
+                framingGuidance: .good
+            )
+            .previewDisplayName("Squat — last second")
+
+            CalibrationOverlayView(
+                phase: .complete(.uncalibrated),
+                framingGuidance: .good
+            )
+            .previewDisplayName("Complete")
+
+            CalibrationOverlayView(
+                phase: .failed(reason: "Try a bigger jump next time!"),
+                framingGuidance: .good
+            )
+            .previewDisplayName("Failed")
         }
+        .background(
+            // Simulate camera beneath the overlay
+            LinearGradient(colors: [.teal.opacity(0.6), .indigo.opacity(0.4)],
+                           startPoint: .top, endPoint: .bottom)
+        )
         .preferredColorScheme(.dark)
     }
 }

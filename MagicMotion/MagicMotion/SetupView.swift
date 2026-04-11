@@ -31,8 +31,11 @@ struct SetupView: View {
         // Calibration overlay covers the whole screen when active
         .overlay {
             if calibrationEngine.isActive {
-                CalibrationOverlayView(phase: calibrationEngine.phase)
-                    .ignoresSafeArea()
+                CalibrationOverlayView(
+                    phase:           calibrationEngine.phase,
+                    framingGuidance: calibrationEngine.framingGuidance
+                )
+                .ignoresSafeArea()
             }
         }
     }

@@ -24,6 +24,34 @@
 import Foundation
 import Combine
 
+// MARK: - FramingGuidance
+
+/// Simple framing state computed from the latest PoseSnapshot.
+/// Updated on every feed() call so CalibrationFitGuideView stays live.
+enum FramingGuidance: Equatable {
+    case noTracking       // camera can't detect a person
+    case tooClose         // shoulder width too large
+    case tooFar           // shoulder width too small
+    case tooLeft          // body offset to the left → prompt to move right
+    case tooRight         // body offset to the right → prompt to move left
+    case notEnoughBody    // hips cut off at bottom of frame
+    case good             // body correctly framed
+
+    var prompt: String {
+        switch self {
+        case .noTracking:    return "Step in front of the camera"
+        case .tooClose:      return "Step back a little"
+        case .tooFar:        return "Come a bit closer"
+        case .tooLeft:       return "Move a little to the right"
+        case .tooRight:      return "Move a little to the left"
+        case .notEnoughBody: return "Step back — we need to see more of you"
+        case .good:          return "Great, we can see you!"
+        }
+    }
+
+    var isReady: Bool { self == .good }
+}
+
 // MARK: - CalibrationPhase
 
 enum CalibrationPhase: Equatable {
@@ -103,6 +131,13 @@ final class CalibrationEngine: ObservableObject {
 
     @Published private(set) var phase: CalibrationPhase = .idle
 
+    /// Live framing guidance — updated every feed() call, even when idle.
+    /// Drive CalibrationFitGuideView from this.
+    @Published private(set) var framingGuidance: FramingGuidance = .noTracking
+
+    /// True when framingGuidance == .good. Convenience for gating UI prompts.
+    @Published private(set) var isBodyFramedCorrectly: Bool = false
+
     // MARK: - Tuning
 
     private let phaseDurationSeconds = 3
@@ -150,6 +185,7 @@ final class CalibrationEngine: ObservableObject {
     /// Feed one PoseSnapshot into the active phase. No-op when idle or already complete.
     /// Call from motionEngine.onPoseSnapshot — it arrives on the main thread.
     func feed(snapshot: PoseSnapshot) {
+        updateFramingGuidance(snapshot)   // always live, regardless of phase
         switch phase {
         case .neutralStance: collectNeutralSample(snapshot)
         case .jump:          collectJumpSample(snapshot)
@@ -308,6 +344,42 @@ final class CalibrationEngine: ObservableObject {
             guard let self, case .failed = self.phase else { return }
             self.phase = .idle
         }
+    }
+
+    // MARK: - Framing guidance
+
+    private func updateFramingGuidance(_ snapshot: PoseSnapshot) {
+        guard snapshot.trackingConfidence > 0.5,
+              let ls = snapshot.leftShoulder,  let rs = snapshot.rightShoulder,
+              let lh = snapshot.leftHip,       let rh = snapshot.rightHip,
+              ls.x >= 0, ls.x <= 1, rs.x >= 0, rs.x <= 1,
+              lh.x >= 0, lh.x <= 1, rh.x >= 0, rh.x <= 1 else {
+            framingGuidance      = .noTracking
+            isBodyFramedCorrectly = false
+            return
+        }
+
+        let sw  = abs(rs.x - ls.x)            // shoulder span (normalized width)
+        let scx = (ls.x + rs.x) / 2.0         // shoulder centre X
+        let hcy = (lh.y + rh.y) / 2.0         // hip centre Y
+
+        let guidance: FramingGuidance
+        if sw > 0.42 {
+            guidance = .tooClose
+        } else if sw < 0.12 {
+            guidance = .tooFar
+        } else if scx < 0.33 {
+            guidance = .tooLeft
+        } else if scx > 0.67 {
+            guidance = .tooRight
+        } else if hcy > 0.92 {
+            guidance = .notEnoughBody
+        } else {
+            guidance = .good
+        }
+
+        framingGuidance      = guidance
+        isBodyFramedCorrectly = guidance == .good
     }
 
     // MARK: - Helpers

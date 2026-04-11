@@ -75,7 +75,10 @@ struct ControllerModeView: View {
 
             // Calibration overlay — auto-dismisses on completion / failure
             if calibrationEngine.isActive {
-                CalibrationOverlayView(phase: calibrationEngine.phase)
+                CalibrationOverlayView(
+                    phase:           calibrationEngine.phase,
+                    framingGuidance: calibrationEngine.framingGuidance
+                )
             }
 
             // Pause banner — full-screen when session is paused
